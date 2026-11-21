@@ -25,7 +25,12 @@
    and controller buttons for the PS2 pad's buttons; a host lists DHD_KEYBOARD in its
    DHD_PC_SETTINGS_ROWS to show it). With touch (the host sets DHD_TOUCH: android, or mouse for a
    desktop test) the page ends with a Touch Controls row whose three screens are
-   touch_settings.c's (finding 141); on Android the page is called SETTINGS. */
+   touch_settings.c's (finding 141); on Android the page is called SETTINGS.
+   On the Display tab, Brightness & Color opens its own screen (finding 275; Graphics has no room
+   for an eleventh row): Brightness, Contrast, Saturation and Gamma, sliders that stop at their
+   ends, live (the present pass draws the next picture with them, gs_present_options_apply), and
+   Reset Picture, all four back to neutral (today's picture). Triangle goes back to the Display tab
+   with what was chosen; the page's own Triangle (PC) still puts the opened values back. */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "menu_page.h"
@@ -58,7 +63,7 @@ void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 void port_unlock_refresh(void);       /* patches_unlock.py: the lobby's rider statues follow Unlock All */
 
-enum { ROWS = 23, MAX_CHOICES = 16 };
+enum { ROWS = 27, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -72,7 +77,8 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
-       VSYNC, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES, LAUNCHER };
+       VSYNC, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES, LAUNCHER,
+       BRIGHTNESS, CONTRAST, SATURATION, GAMMA };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
     {"Display:", "window", 1},
@@ -104,7 +110,13 @@ static Row rows[ROWS] = {
     /* a phone's launcher (finding 225): OFF starts the game at once next time; only where the host
        lists DHD_LAUNCHER_AT_START (Android), the desktop's launcher has no such setting */
     {"Launcher At Start:", "launcher", 1},
+    /* Brightness & Color's screen (finding 275; port/render/src/present/picture.rs): live */
+    {"Brightness:", "brightness", 1},
+    {"Contrast:", "contrast", 1},
+    {"Saturation:", "saturation", 1},
+    {"Gamma:", "gamma", 1},
 };
+static int is_picture(int i) { return i >= BRIGHTNESS && i <= GAMMA; }
 static char monitor_size[24];
 
 /* Unlock All (dhd.ini "unlock_all", DHD_UNLOCK_ALL): the game's unlock checks answer as if
@@ -224,7 +236,8 @@ static const char *const tab_labels[TABS] = {"Display", "Graphics", "Controls", 
 static const int row_tab[ROWS] = {TAB_GRAPHICS, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_CONTROLS, TAB_CONTROLS, TAB_GRAPHICS, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE, TAB_GRAPHICS, TAB_GRAPHICS, TAB_GRAPHICS,
-    TAB_GRAPHICS, TAB_GRAPHICS, TAB_GAME};
+    TAB_GRAPHICS, TAB_GRAPHICS, TAB_GAME,
+    TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY};  /* the picture rows: their screen, from Display */
 static int tab, visible[ROWS], tabs[TABS], tab_count;
 static unsigned held_before;
 static int tab_left[TABS], tab_right[TABS];
@@ -294,8 +307,10 @@ static int locked(const Row *r)
 }
 
 static MenuPage page;
-enum { CONTROLS = 4 };      /* the screen of controls_settings.c */
-static int screen;          /* 0 the PC settings, 1-3 TOUCH CONTROLS, CONTROLS */
+enum { CONTROLS = 4, PICTURE = 5 };  /* the screens of controls_settings.c and Brightness & Color */
+static int screen;          /* 0 the PC settings, 1-3 TOUCH CONTROLS, CONTROLS, PICTURE */
+static int picture_row = -1;  /* the Brightness & Color row on Display, -1 when not shown */
+static int reset_row = -1;    /* PICTURE's Reset Picture row */
 static int touch_row = -1;  /* the Touch Controls row, -1 without touch */
 static int controls_row = -1;  /* the Controls row, -1 when the host doesn't offer it */
 
@@ -303,6 +318,7 @@ static const char *page_title(void)
 {
     const char *touch = host_getenv("DHD_TOUCH");
     if (screen == CONTROLS) return controls_settings_title();
+    if (screen == PICTURE) return "BRIGHTNESS & COLOR";
     if (screen) return touch_settings_title(screen);
     return touch && !strcmp(touch, "android") ? "SETTINGS" : "REVIVED SETTINGS";
 }
@@ -354,7 +370,7 @@ static void commit(Row *r, int apply)
     if (!apply) return;
     r->running = r->selected;
     if (r == &rows[DISPLAY] || r == &rows[SIZE]) host_service_gs_window_apply();
-    else if (r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[COUNTER] || r == &rows[NATIVE_VU])
+    else if (r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[COUNTER] || r == &rows[NATIVE_VU] || is_picture(r - rows))
         host_service_gs_present_options_apply();
     else if (r == &rows[VIBRATION]) host_service_host_pad_vibrate(0, 0, 0);
     else if (r == &rows[UNLOCK]) port_unlock_refresh();
@@ -380,7 +396,25 @@ static void change(int index, int step)
         hle_log("pc settings: %s %s\n", r->label, on ? "on" : "off");
         return;
     }
-    r->selected = r->selected < 0 ? (step > 0 ? 0 : r->count - 1) : (r->selected + step + r->count) % r->count;
+    if (is_picture(r - rows)) {  /* a slider: stops at its ends; a value between choices goes to the next one */
+        int at = r->selected;
+        if (at < 0) {
+            char value[32];
+            current(r, value, sizeof value);
+            double v = atof(value);
+            at = step > 0 ? r->count - 1 : 0;
+            for (int i = 0; i < r->count; i++) {
+                double c = atof(r->choices[i].value);
+                if (step > 0 ? c > v : c < v) {
+                    at = i;
+                    if (step > 0) break;
+                }
+            }
+        } else at += step;
+        if (at < 0 || at >= r->count) return;
+        r->selected = at;
+    } else
+        r->selected = r->selected < 0 ? (step > 0 ? 0 : r->count - 1) : (r->selected + step + r->count) % r->count;
     menu_page_sound(step > 0);
     commit(r, r->live);
     /* Widescreen brings its picture shape (the monitor's, "wide"); saved for the next start,
@@ -395,6 +429,20 @@ static void change(int index, int step)
     hle_log("pc settings: %s %s\n", r->label, r->choices[r->selected].value);
 }
 
+/* Reset Picture: the four picture rows back to neutral (their built-in value), applied at once. */
+static void picture_reset(void)
+{
+    for (int i = BRIGHTNESS; i <= GAMMA; i++) {
+        Row *r = &rows[i];
+        int neutral = find(r, r->builtin);
+        if (locked(r) || neutral < 0 || r->selected == neutral) continue;
+        r->selected = neutral;
+        commit(r, r->live);
+        format(r);
+    }
+    hle_log("pc settings: picture reset\n");
+}
+
 /* ---- the page ---- */
 
 static void page_build(MenuPage *p)
@@ -406,12 +454,15 @@ static void page_build(MenuPage *p)
     p->rows_last = screen ? 0 : 166;
     p->footer = NULL;
     if (screen == CONTROLS) { controls_settings_build(p); return; }
-    if (screen) { touch_settings_build(p, screen); return; }
+    if (screen && screen != PICTURE) { touch_settings_build(p, screen); return; }
     shown_count = 0;
-    for (int i = 0; i < ROWS; i++)
-        if (visible[i] && row_tab[i] == tabs[tab]) shown[shown_count++] = i;
+    int pictures = 0;
+    for (int i = 0; i < ROWS; i++) {
+        pictures |= is_picture(i) && visible[i];
+        if (visible[i] && (screen == PICTURE ? is_picture(i) : row_tab[i] == tabs[tab] && !is_picture(i))) shown[shown_count++] = i;
+    }
     const char *touch_mode = host_getenv("DHD_TOUCH");
-    p->footer = touch_mode && !strcmp(touch_mode, "android")
+    p->footer = (touch_mode && !strcmp(touch_mode, "android")) || screen == PICTURE
         ? GLYPH_LEFT " Change " GLYPH_RIGHT "  " GLYPH_CROSS " Keep  " GLYPH_TRIANGLE " Back"
         : GLYPH_LEFT " Change " GLYPH_RIGHT "  " GLYPH_CROSS " Keep  " GLYPH_TRIANGLE " Undo";
     for (int i = 0; i < MENU_PAGE_ROWS; i++) row_of_menu[i] = -1;
@@ -424,6 +475,13 @@ static void page_build(MenuPage *p)
         menu_of_row[shown[i]] = at;
         format(&rows[shown[i]]);
     }
+    picture_row = reset_row = -1;
+    if (screen == PICTURE) {
+        reset_row = menu_page_row(p, "Reset Picture", 1);
+        controls_row = touch_row = -1;
+        return;
+    }
+    if (tabs[tab] == TAB_DISPLAY && pictures) picture_row = menu_page_row(p, "Brightness & Color", 1);
     const char *list = host_getenv("DHD_PC_SETTINGS_ROWS");
     controls_row = tabs[tab] == TAB_CONTROLS && (!list || listed(list, "DHD_KEYBOARD")) ? menu_page_row(p, "Controls", 1) : -1;
     const char *touch = host_getenv("DHD_TOUCH");
@@ -433,7 +491,7 @@ static void page_build(MenuPage *p)
 static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the legend stays) */
 {
     if (screen == CONTROLS) { controls_settings_update(p, cursor); return; }
-    if (screen) { touch_settings_update(p, screen, cursor); return; }
+    if (screen && screen != PICTURE) { touch_settings_update(p, screen, cursor); return; }
     unsigned held = 0;
     for (int player = 0; player < 2; player++) {
         HostPad pad = {0};
@@ -442,7 +500,7 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     }
     unsigned pressed = held & ~held_before;
     held_before = held;
-    if (p->armed && tab_count > 1 && (pressed & (PAD_L1 | PAD_R1))) {
+    if (!screen && p->armed && tab_count > 1 && (pressed & (PAD_L1 | PAD_R1))) {
         int step = pressed & PAD_R1 ? 1 : -1;
         tab = settings_tab_step(tab, step, tab_count);
         menu_page_sound(step > 0);
@@ -452,6 +510,8 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     const Row *r = row_at(cursor);
     p->hint = NULL;
     if (cursor >= 0 && cursor == controls_row) p->hint = "Your keys and controller buttons";
+    if (cursor >= 0 && cursor == picture_row) p->hint = "Brightness, contrast, saturation and gamma";
+    if (cursor >= 0 && cursor == reset_row) p->hint = "All four back to normal";
     if (r && locked(r)) {
         snprintf(hint, sizeof hint, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
         p->hint = hint;
@@ -461,6 +521,10 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     else if (r == &rows[SHADOWS]) p->hint = "The riders' shadows and the glow around the sun";
     else if (r == &rows[FLARE]) p->hint = "The rings across the picture from the sun";
     else if (r == &rows[PARTICLES]) p->hint = "Dust, dirt, spray and heat haze";
+    else if (r == &rows[BRIGHTNESS]) p->hint = "A lighter or darker picture";
+    else if (r == &rows[CONTRAST]) p->hint = "More or less difference between light and dark";
+    else if (r == &rows[SATURATION]) p->hint = "Stronger or paler colors";
+    else if (r == &rows[GAMMA]) p->hint = "Above 1.0 lifts the dark parts, below deepens them";
     else if (r == &rows[NATIVE_VU]) {
         const char *renderer = host_getenv("DHD_RENDER");
         p->hint = renderer && !strcmp(renderer, "exact") ? "Only with the native renderer"
@@ -474,10 +538,21 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     }
 }
 
+/* The menu row of Brightness & Color on the Display tab (page_build puts it after Display's value
+   rows), with the Display tab selected. */
+static int picture_entry(void)
+{
+    int n = 0;
+    for (int t = 0; t < tab_count; t++)
+        if (tabs[t] == TAB_DISPLAY) tab = t;
+    for (int i = 0; i < ROWS; i++) n += visible[i] && row_tab[i] == TAB_DISPLAY && !is_picture(i);
+    return n;
+}
+
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */
 {
-    if (screen) {  /* TOUCH CONTROLS and CONTROLS save as they go: back to the PC settings, on their row */
-        int row = screen == CONTROLS ? controls_row : touch_row;
+    if (screen) {  /* TOUCH CONTROLS, CONTROLS and PICTURE save as they go: back to the PC settings, on their row */
+        int row = screen == CONTROLS ? controls_row : screen == PICTURE ? picture_entry() : touch_row;
         screen = 0;
         menu_play("S_BACK");
         menu_page_rebuild_at(p, row >= 0 ? row : 0);
@@ -503,8 +578,8 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
 static void page_step(MenuPage *p, int index, int step)
 {
     if (screen == CONTROLS) controls_settings_change(p, index, step);
-    else if (screen) touch_settings_change(p, screen, index, step);
-    else change(index, step);
+    else if (screen && screen != PICTURE) touch_settings_change(p, screen, index, step);
+    else change(index, step);  /* the PC settings and Brightness & Color: rows[] */
 }
 static void page_left(MenuPage *p, int index) { page_step(p, index, -1); }
 static void page_right(MenuPage *p, int index) { page_step(p, index, 1); }
@@ -513,6 +588,22 @@ static void page_right(MenuPage *p, int index) { page_step(p, index, 1); }
 static void page_accept(MenuPage *p, int index)
 {
     if (screen == CONTROLS) { controls_settings_accept(p, index); return; }
+    if (screen == PICTURE) {  /* Reset Picture; elsewhere keep: back to Display, on Brightness & Color */
+        menu_play("S_SELECT");
+        if (index == reset_row) {
+            picture_reset();
+            return;
+        }
+        screen = 0;
+        menu_page_rebuild_at(p, picture_entry());
+        return;
+    }
+    if (!screen && picture_row >= 0 && index == picture_row) {
+        menu_play("S_SELECT");
+        screen = PICTURE;
+        menu_page_rebuild_at(p, 0);
+        return;
+    }
     if (!screen && controls_row >= 0 && index == controls_row) {
         menu_play("S_SELECT");
         controls_settings_open();

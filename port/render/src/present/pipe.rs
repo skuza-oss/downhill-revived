@@ -4,19 +4,23 @@
 //! a target of the surface's format (RGBA8Unorm, or BGRA8Unorm where the surface has no RGBA8:
 //! Apple's CAMetalLayer), write mask all, no
 //! blending, triangle list, one sample; built inside a Validation error scope (None on failure:
-//! logged, not fatal; C then keeps the surface off). The pass clears, writes the 16-byte constants
-//! (display width, height, window width, height), sets the bind group (the source view at 0, the
-//! constants at 1) and draws 3 vertices. present.wgsl picks each target pixel's source pixel with
+//! logged, not fatal; C then keeps the surface off). The pass clears, writes the 32-byte constants
+//! (display width, height, window width, height as u32, then the picture settings' four f32,
+//! `picture.rs`), sets the bind group (the source view at 0, the constants at 1) and draws 3
+//! vertices. present.wgsl picks each target pixel's source pixel with
 //! integer maths, so a 1:1 window shows the picture's exact bytes.
 use crate::device::Gpu;
 use std::sync::Mutex;
+
+/// present.wgsl's `PresentState`: the sizes (4 u32), then the picture settings (4 f32).
+const CONSTANT_BYTES: usize = 32;
 
 pub struct PresentPipe {
     /// The target's format (the surface's).
     pub format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
-    /// present.wgsl's `present_state` (16 bytes; uniform, copy dst).
+    /// present.wgsl's `present_state` (CONSTANT_BYTES; uniform, copy dst).
     constants: wgpu::Buffer,
     /// The bind group of the last source view (C's present_group): remade when the view changes,
     /// as when the display texture is remade at a new size.
@@ -66,7 +70,7 @@ impl PresentPipe {
         let layout = pipeline.get_bind_group_layout(0);
         let constants = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("present"),
-            size: 16,
+            size: CONSTANT_BYTES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -113,7 +117,8 @@ impl PresentPipe {
     }
 
     /// Records the present pass: `source` drawn into `target` (cleared first). `constants` are the
-    /// display's and the window's sizes; they are a queue write, so one draw per submit.
+    /// display's and the window's sizes; with the picture settings now (`picture::uniform`) they
+    /// are a queue write, so one draw per submit.
     pub fn draw(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, source: &wgpu::TextureView,
                 target: &wgpu::TextureView, constants: [u32; 4]) {
         let mut cache = self.group.lock().unwrap_or_else(|p| p.into_inner());
@@ -129,10 +134,7 @@ impl PresentPipe {
             *cache = Some((source.clone(), group));
         }
         let group = &cache.as_ref().expect("present bind group").1;
-        let mut bytes = [0u8; 16];
-        for (i, c) in constants.iter().enumerate() {
-            bytes[i * 4..i * 4 + 4].copy_from_slice(&c.to_le_bytes());
-        }
+        let bytes = constant_bytes(constants, crate::present::picture::uniform());
         gpu.queue.write_buffer(&self.constants, 0, &bytes);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("present"),
@@ -150,5 +152,28 @@ impl PresentPipe {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, group, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+/// present.wgsl's `PresentState`, little-endian: the sizes, then the picture settings.
+fn constant_bytes(sizes: [u32; 4], adjust: [f32; 4]) -> [u8; CONSTANT_BYTES] {
+    let mut bytes = [0u8; CONSTANT_BYTES];
+    for (i, word) in sizes.iter().map(|c| c.to_le_bytes()).chain(adjust.iter().map(|v| v.to_le_bytes())).enumerate() {
+        bytes[i * 4..i * 4 + 4].copy_from_slice(&word);
+    }
+    bytes
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn constants_are_sizes_then_picture() {
+        let b = super::constant_bytes([640, 448, 1280, 960], [1.0, 0.5, 1.5, 0.625]);
+        assert_eq!(&b[0..4], &640u32.to_le_bytes());
+        assert_eq!(&b[12..16], &960u32.to_le_bytes());
+        assert_eq!(&b[16..20], &1.0f32.to_le_bytes());
+        assert_eq!(&b[28..32], &0.625f32.to_le_bytes());
+        // neutral: the picture's words are zeros
+        assert!(super::constant_bytes([1, 2, 3, 4], [0.0; 4])[16..].iter().all(|&x| x == 0));
     }
 }

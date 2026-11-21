@@ -161,6 +161,40 @@ fn unknown_lines() {
     assert_eq!(after, format!("{text}scale = 3\n").as_bytes());
 }
 
+// The picture settings (finding 275): Brightness, Contrast, Saturation 50-150% in tens, Gamma
+// 0.6-1.4 in tenths, neutral by default (today's picture); an older dhd.ini has no lines and stays
+// neutral; another number is passed on as written (the renderer holds it to the range).
+#[test]
+fn picture_settings() {
+    for (key, env, neutral, first, last) in [("brightness", "DHD_BRIGHTNESS", "100", "50", "150"),
+                                             ("contrast", "DHD_CONTRAST", "100", "50", "150"),
+                                             ("saturation", "DHD_SATURATION", "100", "50", "150"),
+                                             ("gamma", "DHD_GAMMA", "1.0", "0.6", "1.4")] {
+        let s = dhd_settings::find(key).unwrap();
+        assert_eq!((s.env, s.default, s.builtin), (env, neutral, neutral), "{key}");
+        // the neutral value in the middle of the row
+        let n = s.choices.len();
+        assert_eq!((s.choices[0].value, s.choices[n - 1].value, s.choices[n / 2].value), (first, last, neutral), "{key}");
+        assert_eq!(env_of("scale = 3
+", &[])[env], neutral, "{key}");
+        assert_eq!(Ini::parse(b"").value(key), neutral, "{key}");
+        // a choice round trip: saved, read back, saved again unchanged
+        let once = saved(b"scale = 3
+", key, last);
+        assert_eq!(Ini::parse(&once).value(key), last, "{key}");
+        assert_eq!(env_of(std::str::from_utf8(&once).unwrap(), &[])[env], last, "{key}");
+        assert_eq!(saved(&once, key, last), once, "{key}");
+        assert!(dhd_settings::find(env).is_some_and(|f| f.key == key));
+    }
+    let b = dhd_settings::find("brightness").unwrap();
+    assert_eq!(b.label("120"), Some("120%"));
+    assert_eq!(dhd_settings::find("gamma").unwrap().label("1.3"), Some("1.3"));
+    // out of the list: no label, passed on as written (the renderer holds 400 to 150 %)
+    assert_eq!(b.label("400"), None);
+    assert_eq!(env_of("brightness = 400
+", &[])["DHD_BRIGHTNESS"], "400");
+}
+
 #[test]
 fn saves_keep_every_other_line() {
     // CRLF, a byte order mark, text that isn't UTF-8, no final line ending: all kept.

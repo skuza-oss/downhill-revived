@@ -137,6 +137,12 @@ button.fact:hover { color: var(--snow); }
 .select select:hover { background: #1a1433; }
 .select option { background: var(--rail); }
 .select svg.i { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--dim); pointer-events: none; }
+/* a stepped setting (the picture settings): - value + */
+.step { display: flex; align-items: center; gap: 6px; flex: none; }
+.step .btn { width: 34px; height: 34px; padding: 0; justify-content: center; font-size: 18px; background: var(--rail); }
+.step .btn:hover { background: #1a1433; }
+.step .btn[aria-disabled="true"] { opacity: .4; cursor: default; }
+.step-v { min-width: 52px; text-align: center; font: 600 13.5px Archivo, sans-serif; color: var(--snow); }
 .sw { width: 40px; height: 23px; border-radius: 12px; background: var(--raise-hi); position: relative; flex: none; transition: background .2s; }
 .sw::after { content: ""; position: absolute; left: 3px; top: 3px; width: 17px; height: 17px; border-radius: 50%; background: var(--lilac); box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .2s var(--ease), background .2s; }
 .sw[aria-checked="true"] { background: var(--ember); }

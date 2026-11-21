@@ -44,17 +44,17 @@ use crate::present::surface::Surface;
 
 /// The present uniform (C: present_uniform, present_uniform_group).
 struct Uniform {
-    /// native.wgsl's `Present`: rect, cover, source, map, mode (80 bytes used of 256; uniform, copy
-    /// dst).
+    /// native.wgsl's `Present`: rect, cover, source, map, mode, adjust (96 bytes used of 256;
+    /// uniform, copy dst).
     buffer: wgpu::Buffer,
-    /// On `init.rs`'s uniform layout, 80 bytes at dynamic offset 0.
+    /// On `init.rs`'s uniform layout, UNIFORM_BYTES at dynamic offset 0.
     group: wgpu::BindGroup,
     /// The bytes last written to `buffer` (None: nothing yet); the same rectangles are not written
     /// again.
     written: Option<[u8; UNIFORM_BYTES]>,
 }
 
-const UNIFORM_BYTES: usize = 80;
+const UNIFORM_BYTES: usize = 96;
 
 /// The fill's small texture, texels (native.wgsl FILL_SIZE).
 const FILL_SIZE: (u32, u32) = (64, 48);
@@ -148,9 +148,9 @@ fn scissor(cut: [i32; 4], w: u32, h: u32) -> Option<(u32, u32, u32, u32)> {
     (right > left && bottom > top).then(|| (left as u32, top as u32, (right - left) as u32, (bottom - top) as u32))
 }
 
-/// native.wgsl's `Present` (rect, cover, source: each x, y, width, height; then map and mode),
-/// little-endian f32.
-fn uniform_bytes(rects: [[f32; 4]; 5]) -> [u8; UNIFORM_BYTES] {
+/// native.wgsl's `Present` (rect, cover, source: each x, y, width, height; then map, mode and the
+/// picture settings' adjust, `present/picture.rs`), little-endian f32.
+fn uniform_bytes(rects: [[f32; 4]; 6]) -> [u8; UNIFORM_BYTES] {
     let mut bytes = [0u8; UNIFORM_BYTES];
     for (i, v) in rects.iter().flatten().enumerate() {
         bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
@@ -284,7 +284,7 @@ impl Native {
             None => &p.group.as_ref().expect("present bind group").1,
         };
         let (cover, source) = if fill { fill_rects(r.rect, r.cut, w, h) } else { ([0.0; 4], [0.0; 4]) };
-        let bytes = uniform_bytes([r.rect, cover, source, map, mode]);
+        let bytes = uniform_bytes([r.rect, cover, source, map, mode, crate::present::picture::uniform()]);
         if uniform.written != Some(bytes) {
             gpu.queue.write_buffer(&uniform.buffer, 0, &bytes);
             uniform.written = Some(bytes);
@@ -402,13 +402,15 @@ mod tests {
     #[test]
     fn uniform_is_little_endian_f32() {
         let b = uniform_bytes([[1.0, 2.0, 640.0, 480.0], [0.0, -60.0, 1280.0, 960.0], [0.0, 0.25, 1.0, 0.5],
-                               [2048.0, 1792.0, 0.0, 64.0], [1.0, 0.0, 0.5, 0.25]]);
+                               [2048.0, 1792.0, 0.0, 64.0], [1.0, 0.0, 0.5, 0.25], [1.2, 1.0, 0.9, 0.8]]);
         assert_eq!(&b[0..4], &1.0f32.to_le_bytes());
         assert_eq!(&b[12..16], &480.0f32.to_le_bytes());
         assert_eq!(&b[20..24], &(-60.0f32).to_le_bytes());
         assert_eq!(&b[44..48], &0.5f32.to_le_bytes());
         assert_eq!(&b[52..56], &1792.0f32.to_le_bytes());
         assert_eq!(&b[76..80], &0.25f32.to_le_bytes());
+        assert_eq!(&b[80..84], &1.2f32.to_le_bytes());
+        assert_eq!(&b[92..96], &0.8f32.to_le_bytes());
     }
 
     #[test]

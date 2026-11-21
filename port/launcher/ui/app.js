@@ -33,6 +33,13 @@ const TABS = [
     { key: 'font', label: 'row.font', type: 'seg', needs: 'pc-settings' },
     { key: 'native_vu', label: 'row.nativeVu', hint: 'row.nativeVu.hint', type: 'switch' },
     { key: 'shadows', label: 'row.performance', hint: () => perfHint(), type: 'performance', needs: 'touch-settings' },
+    // the picture settings (finding 275): steps as the game's left/right, then all four back to normal
+    { key: 'brightness', label: 'row.brightness', hint: 'row.brightness.hint', type: 'step' },
+    { key: 'contrast', label: 'row.contrast', hint: 'row.contrast.hint', type: 'step' },
+    { key: 'saturation', label: 'row.saturation', hint: 'row.saturation.hint', type: 'step' },
+    { key: 'gamma', label: 'row.gamma', hint: 'row.gamma.hint', type: 'step' },
+    { label: 'row.resetPicture', hint: 'row.resetPicture.hint', type: 'action', button: 'row.resetPicture.button', run: () => resetPicture(),
+      anyTime: true },
   ]],
   ['display', [
     { key: 'window', label: 'row.window', type: 'seg', needs: 'pc-settings' },
@@ -343,6 +350,16 @@ function perfHint() {
   return off > 0 && off < EFFECTS.length ? 'row.performance.custom' : 'row.performance.hint';
 }
 
+// Reset Picture: Brightness, Contrast, Saturation and Gamma back to the game's defaults (neutral).
+const PICTURE = ['brightness', 'contrast', 'saturation', 'gamma'];
+async function resetPicture() {
+  try {
+    await operation(async () => { for (const k of PICTURE) await write(k, state.schema[k].default); });
+    flash(t('settings.saved', { what: t('row.resetPicture.done') }));
+  } catch (e) { fail(errorText(e)); }
+  renderRows();
+}
+
 // A hint or label: a table key, else words already.
 const wordsOf = (k) => (typeof k === 'function' ? wordsOf(k()) : k && lang.english[k] !== undefined ? t(k) : k);
 
@@ -366,6 +383,22 @@ function control(row, off) {
         save(row.key, e.target.value, label(opt[1])).then(() => { if (typeof row.hint === 'function') renderRows(); });
       } }, offered().map(([v, text]) => el('option', { value: v, selected: v === value }, show(v, text))));
       return el('div', { class: 'select' }, s, icon('i-down'));
+    }
+    case 'step': {  // - value +: one choice either way, stopping at the ends (steps.js)
+      const list = choices(row.key), values = list.map(([v]) => v);
+      const shown = list.find(([v]) => v === value)?.[1] ?? value;
+      const move = (d) => {
+        const next = stepChoice(values, value, d);
+        if (next === null) return;
+        save(row.key, next, label(list.find(([v]) => v === next)[1])).then(renderRows);
+      };
+      const end = (d) => stepChoice(values, value, d) === null;
+      return el('div', { class: 'step', role: 'group', 'aria-label': name },
+        el('button', { class: 'btn', 'aria-label': t('settings.less', { setting: name }), 'aria-disabled': String(off || end(-1)),
+          tabindex: tab, onclick: () => !off && move(-1) }, '−'),
+        el('span', { class: 'step-v', 'aria-live': 'polite' }, shown),
+        el('button', { class: 'btn', 'aria-label': t('settings.more', { setting: name }), 'aria-disabled': String(off || end(1)),
+          tabindex: tab, onclick: () => !off && move(1) }, '+'));
     }
     case 'switch': {
       const [[offValue], [onValue]] = choices(row.key);
@@ -407,7 +440,8 @@ function control(row, off) {
       return el('button', { class: 'btn', onclick: chooseDisc, disabled: discBusy(state.disc) }, icon('i-disc'),
         t(!value ? 'row.disc.choose' : has('disc-import') ? 'row.disc.replace' : 'row.disc.change'));
     case 'action':
-      return el('button', { class: 'btn', onclick: row.run, disabled: needsDisc() }, row.icon ? icon(row.icon) : null, t(row.button));
+      return el('button', { class: 'btn', onclick: row.run, disabled: !row.anyTime && needsDisc() }, row.icon ? icon(row.icon) : null,
+        t(row.button));
   }
 }
 

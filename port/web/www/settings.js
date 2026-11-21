@@ -24,7 +24,8 @@ const DB = 'downhill-revived-settings', STORE = 'ini';
 // - RESTART, the footer of the others (Widescreen, Font, Frame Rate): the page loaded again.
 // - FPS_MAX: the browser's Frame Rate list and Monitor stop at 144 (the core's own cap is 240).
 export const BROWSER_PC_SETTINGS = {
-  DHD_PC_SETTINGS_ROWS: 'DHD_SCALE,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_FONT,DHD_FPS,DHD_PERF_COUNTER,DHD_NATIVE_VU1,DHD_SHADOWS,DHD_LENS_FLARE,DHD_PARTICLES',
+  DHD_PC_SETTINGS_ROWS: 'DHD_SCALE,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_FONT,DHD_FPS,DHD_PERF_COUNTER,DHD_NATIVE_VU1,DHD_SHADOWS,DHD_LENS_FLARE,DHD_PARTICLES,' +
+    'DHD_BRIGHTNESS,DHD_CONTRAST,DHD_SATURATION,DHD_GAMMA',
   DHD_PC_SETTINGS_LIVE: 'DHD_SCALE',
   DHD_PC_SETTINGS_RESTART: '* Applies when the page is loaded again',
   DHD_SCALE_MAX: '8',
@@ -38,7 +39,8 @@ export const BROWSER_WITHOUT = new Set(['DHD_WINDOW', 'DHD_WINDOW_WIDTH', 'DHD_W
   'DHD_VSYNC', 'DHD_VIBRATION', 'DHD_TEXTURES', 'DHD_TEXTURE_PACK', 'DHD_TEXTURE_CACHE_MB', 'DHD_DISCORD', 'DHD_UPDATE_URL']);
 // The variables the reactor follows while the game runs (gpu_rust_web.c's web_env_changed; Native VU:
 // the GS worker reads the setting there for the VU worker, gs_mesh.h).
-export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT', 'DHD_PERF_COUNTER', 'DHD_NATIVE_VU1']);
+export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT', 'DHD_PERF_COUNTER', 'DHD_NATIVE_VU1',
+  'DHD_BRIGHTNESS', 'DHD_CONTRAST', 'DHD_SATURATION', 'DHD_GAMMA']);
 
 // ---- the crate (port/render/settings/src/web.rs: arguments in buffers it allocates, each result
 // in its memory until the next call)
