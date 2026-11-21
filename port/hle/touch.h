@@ -241,5 +241,9 @@ int touch_target(const Touch *t, int kind, int index, float *x, float *y);
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);
 /* The same control's half sizes (a box's width and height; a round control's radius twice). */
 int touch_control_size(const Touch *t, int control, float *half_w, float *half_h);
+/* While the game's own pause menu has the taps (the rows' MORE, finding 274): the spot the overlay
+   keeps (its Pause button's touch area, mm, centre and half sizes); the host keeps that spot's
+   mouse from the menus. 0: none. */
+int touch_menu_keeps(const Touch *t, float *x, float *y, float *half_w, float *half_h);
 
 #endif

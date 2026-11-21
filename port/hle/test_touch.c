@@ -585,6 +585,105 @@ static void test_pause_controller(void)
     CHECK(pedal_works());
 }
 
+/* MORE (finding 274): the rows hand the game's own pause menu to the menus' taps, no press sent;
+   the overlay shows its Pause button alone and keeps its spot; race touches and the race controls'
+   places send nothing; Pause and Back are the menu's △ (one page back each, the game's own back);
+   the race going on (△ on the top page, or RESUME tapped in the game's menu) gives the race back
+   with the resume guard; a controller takes the menu over as from the rows. */
+static void test_pause_more(void)
+{
+    uint16_t edges[32];
+    TouchShape shapes[TOUCH_SHAPES];
+    for (int preset = 0; preset < 2; preset++) {
+        start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        float px, py, kx, ky, khw, khh, x, y;
+        at(TC_PAUSE, &px, &py);
+        CHECK(!touch_menu_keeps(t, &kx, &ky, &khw, &khh));
+        at(preset ? TC_CROSS : TC_PEDAL, &x, &y);
+        touch_down(t, 1, x, y, now);   /* PEDAL (Classic's ✕) held through it all */
+        field();
+        touch_back(t, now);            /* pause */
+        record(edges, 32, 8);
+        game.clock_moving = 0;
+        fields(3);
+        float mx, my, bx, by;
+        CHECK(touch_target(t, TOUCH_TARGET_PAUSE, 6, &mx, &my));   /* MORE, BAIL OUT's right half */
+        CHECK(touch_target(t, TOUCH_TARGET_PAUSE, 4, &bx, &by));
+        CHECK(my == by && mx > bx);
+        int rows_shapes = touch_shapes(t, shapes, TOUCH_SHAPES);
+        touch_down(t, 2, mx, my, now);
+        touch_up(t, 2, mx, my, now);
+        CHECK(record(edges, 32, 20) == 0);   /* no press: the game's menu is already under the panel */
+        CHECK(touch_visible(t) && !touch_owns_touches(t));
+        int n = touch_shapes(t, shapes, TOUCH_SHAPES);
+        CHECK(n > 0 && n < rows_shapes);
+        CHECK(touch_menu_keeps(t, &kx, &ky, &khw, &khh) && kx == px && ky == py && khw > 0 && khh > 0);
+        /* taps on the race controls' places and anywhere else: the menu's, nothing from the overlay */
+        static const int places[] = {TC_HOP, TC_BRAKE, TC_SLIDE, TC_STICK};
+        for (int i = 0; i < 4; i++) {
+            float cx, cy;
+            if (!touch_control(t, places[i], &cx, &cy, NULL)) continue;
+            touch_down(t, 10 + i, cx, cy, now);
+            field();
+            touch_up(t, 10 + i, cx, cy, now);
+        }
+        touch_down(t, 20, mx, my, now);   /* where MORE was */
+        touch_up(t, 20, mx, my, now);
+        CHECK(record(edges, 32, 20) == 0);
+        CHECK(touch_visible(t) && !touch_owns_touches(t));
+        /* Pause: △ (the page back); a second Pause while it goes waits; then the next △ */
+        touch_down(t, 3, px, py, now);
+        touch_up(t, 3, px, py, now);
+        touch_down(t, 4, px, py, now);
+        touch_up(t, 4, px, py, now);
+        n = record(edges, 32, 20);
+        CHECK(n == 1 && edges[0] == PAD_TRIANGLE);
+        touch_back(t, now);   /* Back: △ as well */
+        n = record(edges, 32, 20);
+        CHECK(n == 1 && edges[0] == PAD_TRIANGLE);
+        CHECK(touch_visible(t) && !touch_owns_touches(t));   /* still paused: still the menu's */
+        game.clock_moving = 1;   /* the top page's △ resumed the race */
+        field();
+        CHECK(touch_owns_touches(t) && !touch_menu_keeps(t, &kx, &ky, &khw, &khh));
+        CHECK(!(buttons() & PAD_CROSS));   /* the resume guard */
+        wait_ms(520);
+        CHECK(buttons() & PAD_CROSS);
+        touch_up(t, 1, x, y, now);
+        field();
+    }
+    /* a controller on the game's menu: PAUSE_PAD (hidden, nothing kept), Back still △ */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_back(t, now);
+    record(edges, 32, 8);
+    game.clock_moving = 0;
+    fields(3);
+    float mx, my, kx, ky, khw, khh;
+    touch_target(t, TOUCH_TARGET_PAUSE, 6, &mx, &my);
+    touch_down(t, 1, mx, my, now);
+    touch_up(t, 1, mx, my, now);
+    field();
+    touch_pad_used(t, now);
+    field();
+    CHECK(!touch_visible(t) && touch_shapes(t, shapes, TOUCH_SHAPES) == 0 && !touch_menu_keeps(t, &kx, &ky, &khw, &khh));
+    touch_back(t, now);
+    CHECK(record(edges, 32, 20) == 1 && edges[0] == PAD_TRIANGLE);
+    game.clock_moving = 1;
+    field();
+    CHECK(pedal_works());
+    /* the race leaves under the game's menu (NEW LEVEL, QUIT): the next race starts unpaused */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_back(t, now);
+    record(edges, 32, 8);
+    game.clock_moving = 0;
+    fields(3);
+    touch_down(t, 1, mx, my, now);
+    touch_up(t, 1, mx, my, now);
+    field();
+    game.flyover = 1;   /* the next track's flight */
+    fields(3);
+    CHECK(!touch_menu_keeps(t, &kx, &ky, &khw, &khh) && touch_owns_touches(t));
+}
+
 /* Restart race: the resume guard set by the old race's clock does not hold PEDAL back in the new
    race (the clock went back to 0). */
 static void test_restart_clock(void)
@@ -2870,6 +2969,7 @@ int main(void)
     test_sprint_guards();
     test_pause();
     test_pause_controller();
+    test_pause_more();
     test_restart_clock();
     test_race_running();
     test_flyover();

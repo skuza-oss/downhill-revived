@@ -77,6 +77,8 @@ static SDL_AtomicInt tilt_sensor;     /* 1 a tilt sensor, 0 none, -1 not known y
 static SDL_AtomicInt pad_named;       /* a controller sent input since the last touch (finding 227) */
 static double pause_due;              /* game thread: the app came back; pause a race offline from then (finding 227) */
 static TouchScreen screen;            /* under lock */
+static float kept[4];                 /* under lock: the spot the overlay keeps from the menus' mouse
+                                         (touch_menu_keeps), 0..1 of the window: x0 y0 x1 y1; x1 <= x0 none */
 static int screen_known;
 
 static Touch *touch;                  /* the game thread's */
@@ -243,6 +245,36 @@ static int test_input(void)
     return on;
 }
 
+/* A mouse event over the spot the overlay keeps while the game's pause menu has the taps (its
+   Pause button, finding 274): a press that starts there, its moves and its release are the overlay's,
+   so the game's menu under it never takes them (a click beside a row's line is Left / Right there,
+   finding 268). Hovers over the spot are dropped too. */
+static int kept_mouse(const SDL_Event *e)
+{
+    static int pressed;   /* a press started on the spot (SDL thread) */
+    int down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN, up = e->type == SDL_EVENT_MOUSE_BUTTON_UP;
+    if (up && pressed) { pressed = 0; return 1; }
+    if (pressed) return 1;
+    float x = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.x : e->button.x;
+    float y = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.y : e->button.y;
+    float w = 0, h = 0;
+#ifdef TOUCH_IOS
+    unsigned pw = 0, ph = 0;   /* ios_touch_finger's mouse is in the picture's pixels */
+    gs_window_pixels(&pw, &ph);
+    w = (float)pw, h = (float)ph;
+#else
+    int ww = 0, wh = 0;
+    SDL_Window *win = SDL_GetWindowFromID(e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.windowID : e->button.windowID);
+    if (win && SDL_GetWindowSize(win, &ww, &wh)) w = (float)ww, h = (float)wh;
+#endif
+    if (w <= 0 || h <= 0) return 0;
+    SDL_LockMutex(lock);
+    int in = kept[2] > kept[0] && x / w >= kept[0] && x / w <= kept[2] && y / h >= kept[1] && y / h <= kept[3];
+    SDL_UnlockMutex(lock);
+    if (in && down) pressed = 1;
+    return in && !up;
+}
+
 /* One SDL event: 1 when it is the touch controls' (the caller drops it). */
 int touch_host_event(const SDL_Event *e)
 {
@@ -267,7 +299,7 @@ int touch_host_event(const SDL_Event *e)
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.which == SDL_TOUCH_MOUSEID : e->button.which == SDL_TOUCH_MOUSEID)
-            return owned;   /* a touch's mouse: the menus' only while the overlay is away */
+            return owned || kept_mouse(e);   /* a touch's mouse: the menus' only while the overlay is away */
         if (touch_on() == 2) {   /* the desktop's mouse as a finger */
             SDL_WindowID id = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.windowID : e->button.windowID;
             SDL_Window *w = SDL_GetWindowFromID(id);
@@ -283,7 +315,7 @@ int touch_host_event(const SDL_Event *e)
                    cursor. That motion is no finger's: it is dropped once the leave has told where
                    the OS cursor is (the first one is taken back at its leave), as present.c does for
                    the menus' mouse; else a held finger would jump to the OS cursor after every move. */
-                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return owned; }
+                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return owned || kept_mouse(e); }
                 leave_dropped = 0;
                 before_x = last_x, before_y = last_y;
                 last_x = x, last_y = y, last_px = e->motion.x, last_py = e->motion.y;
@@ -294,7 +326,7 @@ int touch_host_event(const SDL_Event *e)
                 if (test_input()) x = last_x, y = last_y;
                 push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
             }
-            return owned;
+            return owned || kept_mouse(e);
         }
         return 0;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:   /* test desktops: the motion before it was the OS cursor's (above) */
@@ -570,7 +602,13 @@ static void publish(void)
 {
     static TouchShape shapes[TOUCH_SHAPES];
     int n = touch_shapes(touch, shapes, TOUCH_SHAPES);
+    float kx = 0, ky = 0, khw = 0, khh = 0;
+    int keeps = touch_menu_keeps(touch, &kx, &ky, &khw, &khh);
     SDL_LockMutex(lock);
+    if (keeps && screen.width > 0 && screen.height > 0) {
+        kept[0] = (kx - khw) / screen.width, kept[1] = (ky - khh) / screen.height;
+        kept[2] = (kx + khw) / screen.width, kept[3] = (ky + khh) / screen.height;
+    } else kept[0] = kept[1] = kept[2] = kept[3] = 0;
     for (int i = 0; i < n; i++) {
         float *f = published + i * 16;
         const TouchShape *sh = &shapes[i];
@@ -782,8 +820,12 @@ void host_service_touch_field(uint32_t address)
     h->leave_race = touch_take_ask(touch) == TOUCH_ASK_LEAVE_RACE;
     h->freeze = touch_freeze(touch);
     int own = touch_owns_touches(touch);
-    if (own != SDL_GetAtomicInt(&owns))   /* who a tap goes to: a menu that ignores taps shows here (finding 218) */
-        fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
+    if (own != SDL_GetAtomicInt(&owns)) {   /* who a tap goes to: a menu that ignores taps shows here (finding 218) */
+        float kx = 0, ky = 0, khw = 0, khh = 0;
+        if (!own && touch_menu_keeps(touch, &kx, &ky, &khw, &khh))   /* MORE: the game's pause menu (finding 274) */
+            fprintf(stderr, "touch: the game's pause menu takes the touches; Pause stays at %.1f,%.1f mm\n", kx, ky);
+        else fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
+    }
     SDL_SetAtomicInt(&owns, own);
     publish();
 }
