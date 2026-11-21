@@ -521,13 +521,24 @@ means 60 fps or more at 4x and up. Lines marked *estimate* are not yet measured 
 | **Windows** | Windows 10/11 64-bit; a 4-thread CPU from about 2016 (Core i5 6th gen, Ryzen 3 1200; *estimate*); a Direct3D 12 or Vulkan GPU, integrated is fine (Intel UHD 620, AMD Vega 8; *estimate*); 4 GB RAM | a 6-core CPU (Ryzen 5 3600, Core i5 10th gen); GTX 1060 / RX 580 for 4x, RTX 2060 / RX 6600 for 8x (*estimate*); 8 GB RAM |
 | **Mac** (experimental) | Apple silicon (M1 or later), macOS 11 or later, 8 GB | any M-series Mac |
 | **Linux** (experimental) | 64-bit, glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and later), a Vulkan driver (Mesa 22+, NVIDIA 470+), WebKitGTK 4.1 for the launcher's zip (the AppImage carries it); CPU and GPU as on Windows; Steam Deck works | as on Windows |
-| **Android** (experimental) | Android 10 or later, arm64 with Vulkan; a Helio G80/G85 or Snapdragon 680 class chip (Mali-G52 MC2 GPU); 4 GB RAM; 3 GB free storage; **Performance Mode on** (REVIVED SETTINGS > Graphics) | Snapdragon 778G / 870, Dimensity 1080 or better |
+| **Android** (experimental) | Android 10 or later, arm64 with Vulkan; Android System WebView 80 or later (for the launcher); a Helio G80/G85 or Snapdragon 680 class chip (Mali-G52 MC2 GPU); 4 GB RAM; 3 GB free storage; **Performance Mode on** (REVIVED SETTINGS > Graphics) | Snapdragon 778G / 870, Dimensity 1080 or better |
 | **Browser** (experimental) | desktop Chrome or Edge with WebGPU; a 6-core desktop CPU from about 2019 (the browser runs at about a third of native speed); online: P2P races only | a fast 8-core desktop |
 | **iPhone / iPad** (experimental) | iOS 17 or later (an A12 chip or later); 3 GB free storage; *estimate*, not yet measured | a recent Pro iPhone or an M-series iPad (*estimate*) |
 
 Measured: a Ryzen 5 7600 with an RTX 3070 runs about 250 fps at 8x; AMD integrated graphics hold
 60 fps at 5x; an M1 MacBook Air runs over 100 fps; a Redmi 9 (Helio G80) about 50 fps at 2x and
 about 63 with Performance Mode; a Mi 11i (Snapdragon 870) 59 fps at 2x.
+
+Two minimums are checked when the app opens, and the app says so instead of failing:
+
+- **Android System WebView** (the part of Android that shows the launcher): with a version older
+  than 80 the launcher shows "Update Android System WebView" with your version and the one needed,
+  and a button to its Play Store page. Update it there (it is a normal app, also listed under
+  Settings > Apps), then open Downhill Revived again.
+- **The chip of an iPhone or iPad**: the game's code needs an A12 or later. On an older one (the
+  iPad 6th and 7th generation and the 2017 iPad Pro, A10 and A10X, run iPadOS 17 but cannot run the
+  game) the app shows "This iPad's chip is too old for the game" and nothing else; no update
+  changes that.
 
 Below the minimum the game may still start, but runs well under 60 fps: phones with a Helio
 G35/P35/A22 (PowerVR GE8320), Snapdragon 4xx or Unisoc SC9863A, phones with 2-3 GB of RAM, and
