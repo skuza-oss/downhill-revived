@@ -17,7 +17,7 @@ function load(file, extra = {}) {
 
 // ---- the page's scripts, in index.html's order, as one script: a name declared twice fails here
 const order = [...ui('index.html').matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
-assert.deepStrictEqual(order, ['i18n.js', 'bridge.js', 'disc_flow.js', 'stick.js', 'controls.js', 'app.js', 'pad.js']);
+assert.deepStrictEqual(order, ['i18n.js', 'bridge.js', 'disc_flow.js', 'steps.js', 'stick.js', 'controls.js', 'app.js', 'pad.js']);
 new vm.Script(order.map(ui).join('\n;\n'), { filename: 'page.js' });
 
 // ---- i18n
@@ -72,7 +72,8 @@ assert.strictEqual(i.tn('server.races', 3), '3 public races');
 // the launcher names a setting as the game's own SETTINGS page does (port/hle/pc_settings.c)
 const gamePage = fs.readFileSync(path.join(__dirname, '..', 'hle', 'pc_settings.c'), 'utf8');
 for (const [key, label] of [['row.scale', 'Resolution'], ['row.window', 'Display'], ['row.size', 'Window Size'], ['row.aspect', 'Picture'],
-  ['row.scaling', 'Scaling'], ['row.widescreen', 'Widescreen']]) {
+  ['row.scaling', 'Scaling'], ['row.widescreen', 'Widescreen'], ['row.brightness', 'Brightness'], ['row.contrast', 'Contrast'],
+  ['row.saturation', 'Saturation'], ['row.gamma', 'Gamma']]) {
   assert.ok(gamePage.includes(`{"${label}:"`), `${label} is a row of the game's page`);
   assert.strictEqual(en[key].toLowerCase(), label.toLowerCase(), `${key} reads as the game's ${label} (case aside)`);
 }
@@ -83,6 +84,27 @@ for (const [k, v] of Object.entries(en)) {
   assert.ok(!/\{\s*\}|\{\d+\}|%s|%d/.test(v), `${k}: placeholders have names`);
   assert.strictEqual((v.match(/\*\*/g) || []).length % 2, 0, `${k}: bold spans paired`);
 }
+
+// ---- the picture settings (finding 275): Graphics' four stepped rows and Reset Picture, the game's
+// left/right as - and +: one choice, stopping at the ends
+const app = ui('app.js');
+for (const key of ['brightness', 'contrast', 'saturation', 'gamma'])
+  assert.ok(app.includes(`{ key: '${key}', label: 'row.${key}', hint: 'row.${key}.hint', type: 'step' }`), `${key}: a step row`);
+assert.ok(app.includes("label: 'row.resetPicture'") && gamePage.includes('"Reset Picture"'), 'Reset Picture in both');
+for (const k of ['row.resetPicture', 'row.resetPicture.button', 'row.resetPicture.done', 'settings.less', 'settings.more']) assert.ok(en[k], k);
+const { stepChoice } = load('steps.js');
+const percents = ['50', '60', '70', '80', '90', '100', '110', '120', '130', '140', '150'];
+assert.strictEqual(stepChoice(percents, '100', 1), '110');
+assert.strictEqual(stepChoice(percents, '100', -1), '90');
+assert.strictEqual(stepChoice(percents, '150', 1), null, 'stops at the top');
+assert.strictEqual(stepChoice(percents, '50', -1), null, 'stops at the bottom');
+assert.strictEqual(stepChoice(percents, '125', 1), '130', 'a number between choices: the next one up');
+assert.strictEqual(stepChoice(percents, '125', -1), '120');
+assert.strictEqual(stepChoice(percents, '400', 1), null);
+assert.strictEqual(stepChoice(percents, '400', -1), '150');
+assert.strictEqual(stepChoice(percents, 'bright', 1), '110', 'no number: from the middle (neutral)');
+assert.strictEqual(stepChoice(['0.6', '0.7', '0.8', '0.9', '1.0', '1.1', '1.2', '1.3', '1.4'], '1', 1), '1.1', 'gamma 1 is 1.0');
+assert.strictEqual(stepChoice([], '1', 1), null);
 
 // ---- the Controls tab's stick captions: one line when they fit, else split after the colon
 const stick = load('stick.js');
