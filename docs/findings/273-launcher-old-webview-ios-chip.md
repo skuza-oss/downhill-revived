@@ -23,9 +23,16 @@ and `ipa_audit.py`. No game state changes (no traces).
 - [x] 2026-11-21: the page runs on Chromium 80; `test_launcher_ui.js` refuses newer syntax, APIs
       and CSS; `ui/boot.js` (ES5) shows the WebView message or a failed start's error; the
       `webview` link alias; Android logs the WebView's version (a9ad9107)
-- [x] 2026-11-21: the iOS chip check (`port/ios/app/chip.c`) and its page
-- [ ] owed: the iOS app build, `ipa_audit.py` and the Simulator's forced check (the Mac was not on
-      the network during the lane); a real A10 run; an old-WebView emulator start
+- [x] 2026-11-21: the iOS chip check (`port/ios/app/chip.c`, its rule tested in `test_runtime.py`'s
+      `ios-chip`) and its page (56146dd7); PLAYING.md's minimums (5542bee1)
+- [x] 2026-11-21 checks on the PC: `check.py quick` OK (`ios chip: PASS`, `launcher links: PASS`),
+      `check.py docs` OK, the launcher's three node tests, `test_build_apk.py`, the debug APK
+      (0.8.10, 34.0 MB, `assets/launcher/boot.js` in it); the floor test fails on 0.8.10's app.js
+      (`replaceChildren`) and style.css (`inset`)
+- [ ] owed: the iOS app build, `ipa_audit.py`, the Simulator's forced page
+      (`SIMCTL_CHILD_DHD_IOS_CHIP_TOO_OLD=1`) and a disassembly of the three initializers (the Mac
+      was offline for the whole lane); a real A10 run; a start on an old WebView (no such emulator
+      image on the PC: only API 36 and 37; none downloaded)
 
 ## What the page needed (before this lane)
 
