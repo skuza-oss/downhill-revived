@@ -23,6 +23,7 @@ lead's, at the release); HDR or wide-gamut output.
 
 - [x] 2026-11-21: renderer (`present/picture.rs`, `picture.wgsl` in both present passes), the
   settings rows, the game's Brightness & Color screen, the launcher's rows, PLAYING.md
+- [x] 2026-11-21: the proof (Result): checks, traces, hidden run, GPU present tests, APK
 
 ## Decisions
 
@@ -71,7 +72,39 @@ lead's, at the release); HDR or wide-gamut output.
 
 - Gamma 0.6 to 1.6 (the brief's example) has 1.0 off the middle; 0.6 to 1.4 keeps neutral in the
   middle of a slider, so it was used.
+- The first hidden run showed the screen but left/right did nothing: `page_step` sent every screen
+  but 0 and CONTROLS to the touch screens' handler. The screen's steps go to `change` now.
+- A time-based presented capture (`DHD_CAPTURE_PRESENTED`) is the same frame in two runs only where
+  the picture stands still: the boot's loading card is; the OPTIONS list (its sky moves, and the two
+  runs' keys landed on different menus) is not.
+- `rustgs.py test` fails `abi_layout`'s `sizes_the_header_documents` (DhdrCommand 240 bytes, the test
+  says 208) on the base build too: this lane touches neither the header nor `abi.rs`. Not fixed here.
 
 ## Result
 
-Filled in at the merge.
+On the lane branch (base `bbe4acc5`, Windows, RTX 3070):
+
+- `DHD_BUILD_SLOTS=4 python tools/check.py port -j 6` (fresh worktree, `DHD_MODULE_CACHE=0`): OK;
+  `check.py docs`: OK.
+- Renderer tests (`rustgs.py test --target x86_64-pc-windows-msvc`): the library's 39 (with
+  `picture.rs`' four and the exact present's constants; `shaders.rs` validates every module with
+  naga) and `native_spirv` with `DHD_MALIOC` (malioc 2025.4, Mali-G57: every present stage compiles)
+  pass. The settings crate's `picture_settings` test and the launcher's tests pass (`check.py port`).
+- GPU present passes at neutral, deterministic: `test_native_transfers.py --presented` (native: 39
+  pictures, every presented pixel equal to the picture, VERDICT PASS) and `test_gs_wgpu.py --only
+  present` (exact, VERDICT PASS).
+- State traces against a base build of `bbe4acc5` made for this lane: boot and race PASS.
+- Hidden run at scale 2 (960x720 window, presented captures): the new build's boot frames equal the
+  base build's byte for byte, the loading card among them (5121 colours); on the Brightness & Color
+  screen each setting changed the picture live (mean RGB from 40.4 29.2 23.6, mean saturation
+  102.3: brightness 130 % 48.5 35.1 28.4; contrast 130 % 18.4 8.6 4.2; saturation 50 % to 58.6;
+  gamma 1.4 61.1 48.1 41.9) and Reset Picture brought frames equal to the neutral ones back. The
+  captures and the two scripts stay outside the repository.
+- `port/android/build_apk.py` (debug): builds.
+- Cost: four `vec4` loads already in the uniform, a uniform branch, and when not neutral about a
+  dozen ALU operations and three `pow` per pixel of a pass that already runs; no extra pass, target
+  or sample. No timing on this PC.
+
+Not covered: only compiled, not run here: Linux, macOS, iOS, Android (the APK builds; the shaders
+pass SPIR-V and malioc) and the browser (its present is the same Rust code; `settings.js` lists the
+rows as live). Phone and Mac runs are the lead's at the release.
