@@ -472,6 +472,11 @@ and the game goes on without it. If something in the picture looks wrong, turn i
 then emulates those programs as before) and tell us with your `dhd.log` (in the browser version:
 the lines under LOG).
 
+**Brightness & Color** (the last row of the Display tab) opens Brightness, Contrast, Saturation
+and Gamma. Left/right step each one and the picture changes at once; Reset Picture puts all four
+back to normal (100% and 1.0, the game's own picture). They change the game's picture, menus and
+movies, not the touch buttons or the FPS counter, and they are in the launcher's Graphics tab too.
+
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
 first start. The REVIVED SETTINGS page writes most of them for you.
 
@@ -504,6 +509,10 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 | `shadows` | `1` | Performance: `0` turns off the riders' shadows and the sun's glow |
 | `lens_flare` | `1` | Performance: `0` turns off the lens flare's ghosts (the sun's disc and halo stay) |
 | `particles` | `1` | Performance: `0` turns off the particles (dust, dirt, spray, heat haze) |
+| `brightness` | `100` | a lighter or darker picture: `50` to `150` (percent, in steps of 10); `100` is the game's own |
+| `contrast` | `100` | more or less difference between light and dark: `50` to `150` (percent) |
+| `saturation` | `100` | stronger or paler colors: `50` to `150` (percent) |
+| `gamma` | `1.0` | `0.6` to `1.4`: above `1.0` lifts the dark parts, below deepens them |
 | `native_vu` | `on` | Native VU: the VU1 programs run on the graphics card; `off` emulates them (for troubleshooting) |
 | `room_region` | `auto` | where the rooms you create run (ONLINE's Room Region row): `auto` (the server picks by where you reach Cloudflare), `weur`, `eeur`, `enam`, `wnam`, `apac-ne`, `apac-se` or `oc` |
 
