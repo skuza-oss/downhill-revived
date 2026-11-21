@@ -17,8 +17,90 @@ function load(file, extra = {}) {
 
 // ---- the page's scripts, in index.html's order, as one script: a name declared twice fails here
 const order = [...ui('index.html').matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
-assert.deepStrictEqual(order, ['i18n.js', 'bridge.js', 'disc_flow.js', 'stick.js', 'controls.js', 'app.js', 'pad.js']);
+assert.deepStrictEqual(order, ['boot.js', 'i18n.js', 'bridge.js', 'disc_flow.js', 'stick.js', 'controls.js', 'app.js', 'pad.js']);
 new vm.Script(order.map(ui).join('\n;\n'), { filename: 'page.js' });
+assert.ok(ui('index.html').indexOf('<script src="boot.js">') < ui('index.html').indexOf('<body'), 'boot.js runs before the body');
+
+// ---- the oldest WebView the page runs on (finding 273): Chromium 80 (Android System WebView 80).
+// A denylist, no parser: each construct newer than 80 the page could plausibly use, with the first
+// Chromium that has it. A match fails the test: rewrite the place (no transpiler).
+const MIN_CHROMIUM = 80;
+const code = (text) => text.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/\s.*$/, '')).join('\n');
+const tooNewJs = [
+  [/\.replaceChildren\(/, 'Element.replaceChildren', 86], [/\.at\(/, 'Array/String.at', 92],
+  [/\.roundRect\(/, 'canvas roundRect', 99], [/\.replaceAll\(/, 'String.replaceAll', 85],
+  [/\?\?=|\|\|=|&&=/, 'logical assignment', 85], [/\bstructuredClone\b/, 'structuredClone', 98],
+  [/\bObject\.hasOwn\b/, 'Object.hasOwn', 93], [/\.findLast(Index)?\(/, 'Array.findLast', 97],
+  [/\.(toSorted|toReversed|toSpliced)\(/, 'change-array-by-copy', 110], [/\bPromise\.any\b|\bAggregateError\b/, 'Promise.any', 85],
+  [/\bWeakRef\b|\bFinalizationRegistry\b/, 'WeakRef', 84], [/\bthis\.#|^\s*(static\s+)?#[A-Za-z_]\w*\s*[(=;]/m, 'private class members', 84],
+  [/\bstatic\s*\{/, 'class static block', 94], [/^await\b/m, 'top-level await', 89],
+  [/\bIntl\.(DisplayNames|Segmenter)\b/, 'Intl.DisplayNames / Segmenter', 81], [/\bAbortSignal\.(timeout|any)\b/, 'AbortSignal.timeout', 103],
+  [/\.checkVisibility\(|\.showPopover\(|\.inert\b/, 'checkVisibility / popover / inert', 102],
+  [/\b(Object|Map)\.groupBy\b|\bPromise\.withResolvers\b|\bArray\.fromAsync\b/, 'groupBy / withResolvers / fromAsync', 117],
+];
+for (const f of order.filter((f) => f !== 'boot.js')) {
+  const text = code(ui(f));
+  for (const [re, what, since] of tooNewJs) assert.ok(!re.test(text), `${f}: ${what} needs Chromium ${since}, the page's floor is ${MIN_CHROMIUM}`);
+}
+const css = ui('style.css').replace(/\/\*[\s\S]*?\*\//g, '');
+for (const [re, what, since] of [
+  [/(^|[;{\s])inset\s*:/, 'inset', 87], [/(^|[;{\s])(translate|scale|rotate)\s*:/, 'individual transform properties', 104],
+  [/:(is|where)\(/, ':is() / :where()', 88], [/:has\(/, ':has()', 105], [/aspect-ratio\s*:/, 'aspect-ratio', 88],
+  [/\d(dvh|svh|lvh|dvw|svw|lvw)\b/, 'dynamic viewport units', 108], [/color-mix\(/, 'color-mix()', 111],
+  [/@container|@layer/, '@container / @layer', 99], [/accent-color\s*:/, 'accent-color', 93], [/text-wrap\s*:/, 'text-wrap', 114],
+  [/overflow(-[xy])?\s*:\s*clip/, 'overflow: clip', 90], [/(^|\s)&[\s.:#[]/m, 'CSS nesting', 112],
+]) assert.ok(!re.test(css), `style.css: ${what} needs Chromium ${since}, the page's floor is ${MIN_CHROMIUM}`);
+for (const rule of css.split('}')) {
+  assert.ok(!/(^|[;{\s])appearance\s*:/.test(rule) || /-webkit-appearance\s*:/.test(rule), 'style.css: appearance needs -webkit-appearance beside it (Chromium 84)');
+}
+// boot.js is the safety net for older WebViews: ES5 only, and its floor is the page's
+{
+  const boot = code(ui('boot.js')).replace(/'[^'\n]*'/g, "''");
+  for (const [re, what] of [[/=>/, 'arrow function'], [/\b(let|const|class)\s/, 'let / const / class'], [/`/, 'template string'],
+    [/\.\.\./, 'spread'], [/\basync\b|\bawait\b/, 'async'], [/\?\.|\?\?/, '?. / ??'], [/\bfor\s*\([^)]*\bof\b/, 'for...of']]) {
+    assert.ok(!re.test(boot), `boot.js must stay ES5: ${what}`);
+  }
+  assert.strictEqual(load('boot.js').minChromium, MIN_CHROMIUM, "boot.js's MIN_CHROMIUM is the test's floor");
+}
+// boot.js in a page: an old Android WebView gets the message and the Play Store button at once; a
+// new one nothing until a start fails; nothing after the start
+function bootPage(ua) {
+  const listeners = {};
+  const node = (tag) => ({ tag, kids: [], className: '', on: {}, appendChild(k) { this.kids.push(k); }, addEventListener(e, f) { this.on[e] = f; } });
+  const body = node('body');
+  const page = {
+    navigator: { userAgent: ua, maxTouchPoints: 5 },
+    document: { documentElement: { className: '' }, body, createElement: node, createTextNode: (text) => ({ text }), addEventListener() {} },
+    window: { addEventListener: (e, f) => { listeners[e] = f; } },
+  };
+  vm.createContext(page);
+  vm.runInContext(ui('boot.js'), page);
+  const words = (n) => (n.text || '') + (n.kids || []).map(words).join(' ');
+  return { page, listeners, body, words };
+}
+{
+  const old = bootPage('Mozilla/5.0 (Linux; Android 10; Redmi Note 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/74.0.3729.186 Mobile Safari/537.36');
+  assert.ok(/\btouch\b/.test(old.page.document.documentElement.className), 'a phone layout before the page starts');
+  assert.strictEqual(old.body.kids.length, 1);
+  assert.ok(/your version: 74, needed: 80/.test(old.words(old.body.kids[0])), old.words(old.body.kids[0]));
+  const sent = [];
+  old.body.kids[0].kids[2].on.click();   // before the bridge's port: queued
+  old.listeners.message({ data: 'dhd-bridge', ports: [{ postMessage: (t) => sent.push(JSON.parse(t)) }] });
+  assert.deepStrictEqual(sent, [{ id: 0, call: 'open_link', args: { url: 'webview' } }]);
+  old.listeners.error({ error: new Error('later') });
+  assert.strictEqual(old.body.kids.length, 1, 'one message');
+
+  const fresh = bootPage('Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36');
+  assert.strictEqual(fresh.body.kids.length, 0);
+  fresh.listeners.unhandledrejection({ reason: new Error('snapshot broke') });
+  assert.ok(/could not start.*snapshot broke/.test(fresh.words(fresh.body.kids[0])), fresh.words(fresh.body.kids[0]));
+
+  const desk = bootPage('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0');
+  assert.ok(!/touch/.test(desk.page.document.documentElement.className), 'the desktop keeps its layout');
+  vm.runInContext('dhdBoot.started = true', desk.page);
+  desk.listeners.error({ error: new Error('after the start') });
+  assert.strictEqual(desk.body.kids.length, 0, 'an error after the start is not the safety net\'s');
+}
 
 // ---- i18n
 const i = load('i18n.js');

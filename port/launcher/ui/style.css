@@ -22,7 +22,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* The focus ring shows only after a key or pad press (html.kbd), not for the focus PLAY gets at
    start or after a click. It follows each control's own corners. */
 :focus-visible { outline: none; }
-.kbd :focus-visible, .pad :focus { outline: 2px solid var(--gold); outline-offset: 3px; }
+/* two rules: an old WebView without :focus-visible (Chromium < 86) drops only the first one */
+.kbd :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.pad :focus { outline: 2px solid var(--gold); outline-offset: 3px; }
 [hidden] { display: none !important; }
 svg.i { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 ::-webkit-scrollbar { width: 10px; }
@@ -64,7 +66,7 @@ svg.i { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-widt
 
 /* main */
 .main { flex: 1; position: relative; overflow: hidden; min-width: 0; }
-.page { position: absolute; inset: 0; animation: in .22s var(--ease); }
+.page { position: absolute; top: 0; right: 0; bottom: 0; left: 0; animation: in .22s var(--ease); }
 @keyframes in { from { opacity: 0; transform: translateY(6px); } }
 .home { height: 100%; padding: 30px 40px 24px; display: flex; flex-direction: column; }
 .home h1 { font-size: 28px; font-weight: 800; letter-spacing: -.01em; line-height: 1.1; }
@@ -131,10 +133,10 @@ button.fact:hover { color: var(--snow); }
 .seg button:hover { color: var(--snow); background: rgba(255, 255, 255, .05); }
 .seg button.on { background: var(--ember); color: var(--ink-on-ember); }
 .select { position: relative; }
-.select select { appearance: none; font: 600 13.5px Archivo, sans-serif; color: var(--snow); background: var(--rail); border: 0; border-radius: var(--r); padding: 8px 34px 8px 12px; min-width: 130px; cursor: pointer; }
+.select select { -webkit-appearance: none; appearance: none; font: 600 13.5px Archivo, sans-serif; color: var(--snow); background: var(--rail); border: 0; border-radius: var(--r); padding: 8px 34px 8px 12px; min-width: 130px; cursor: pointer; }
 .select select:hover { background: #1a1433; }
 .select option { background: var(--rail); }
-.select svg.i { position: absolute; right: 10px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--dim); pointer-events: none; }
+.select svg.i { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--dim); pointer-events: none; }
 .sw { width: 40px; height: 23px; border-radius: 12px; background: var(--raise-hi); position: relative; flex: none; transition: background .2s; }
 .sw::after { content: ""; position: absolute; left: 3px; top: 3px; width: 17px; height: 17px; border-radius: 50%; background: var(--lilac); box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .2s var(--ease), background .2s; }
 .sw[aria-checked="true"] { background: var(--ember); }
@@ -195,7 +197,7 @@ canvas.sticks { flex: none; }
 .pad .pads { display: flex; }
 .pads span { display: flex; align-items: center; gap: 6px; }
 .pads .tabs-hint { display: none; }
-body:has(#page-settings:not([hidden])) .pads .tabs-hint { display: flex; }
+body[data-page="settings"] .pads .tabs-hint { display: flex; }
 .pads i { display: inline-grid; place-items: center; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 5px; font-size: 11px; font-weight: 800; font-style: normal; background: var(--raise-hi); color: var(--snow); }
 .pads i.pa { border-radius: 10px; background: #2f9e5b; color: #fff; }
 .pads i.pb { border-radius: 10px; background: #c8423f; color: #fff; }
@@ -269,5 +271,11 @@ pre.licences { margin-top: 14px; max-height: 60vh; overflow: auto; font: 500 12p
   .foot { height: 62px; padding: 0 14px 0 18px; }
   .btn.primary { height: 46px; min-width: 150px; }
 }
+
+/* boot.js's message when the page's script can't start (finding 273) */
+.boot-fail { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10; padding: 32px 24px; overflow-y: auto; background: var(--ground); }
+.boot-fail h1 { font-size: 24px; font-weight: 800; margin-bottom: 12px; }
+.boot-fail p { max-width: 560px; font-size: 15px; line-height: 1.5; color: var(--lilac); margin-bottom: 20px; user-select: text; }
+.touch .boot-fail { padding: calc(env(safe-area-inset-top) + 32px) 24px 24px; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

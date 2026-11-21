@@ -4,7 +4,8 @@
 
    The page's message is untrusted, so the rule stays native; the OS call that opens the link
    stays per platform. Accepted: the aliases "discord" and "kofi" (resolved to the project's
-   invite and page) and this repository's pages, which is every link the page sends (Help, the
+   invite and page), "webview" (Android System WebView's Play Store page: boot.js's message on a
+   too-old WebView, finding 273) and this repository's pages, which is every link the page sends (Help, the
    release page, the notes fallback, the disc problem's More link). Refused: anything else,
    whitespace and control characters, quotes, angle brackets, backslashes and dot segments,
    plain or percent-encoded. The release manifest's URLs keep their own, narrower rule
@@ -15,6 +16,7 @@
 
 #define LAUNCHER_LINK_DISCORD "https://discord.gg/XrSeTyzfr2"
 #define LAUNCHER_LINK_KOFI "https://ko-fi.com/skuza"
+#define LAUNCHER_LINK_WEBVIEW "https://play.google.com/store/apps/details?id=com.google.android.webview"
 #define LAUNCHER_LINK_REPOSITORY "https://github.com/skuza-oss/downhill-revived"
 
 /* The URL to open (url itself or an alias's target, static storage), or NULL when refused. */
@@ -24,6 +26,7 @@ static inline const char *launcher_link(const char *url)
     if (!url) return NULL;
     if (!strcmp(url, "discord")) return LAUNCHER_LINK_DISCORD;
     if (!strcmp(url, "kofi")) return LAUNCHER_LINK_KOFI;
+    if (!strcmp(url, "webview")) return LAUNCHER_LINK_WEBVIEW;
     if (strncmp(url, repository, sizeof repository - 1)) return NULL;
     const char next = url[sizeof repository - 1];   /* not downhill-revived.evil or -other */
     if (next && next != '/' && next != '?' && next != '#') return NULL;

@@ -25,6 +25,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -139,6 +140,9 @@ public class LauncherActivity extends Activity {
 
     /** The launcher's page in the WebView. */
     private void showPage() {
+        String webview = webViewVersion();
+        Log.i(TAG, "launcher: " + webview);
+        Native.launcherLog(getFilesDir().getPath(), "launcher: " + webview);  // the page's floor: Chromium 80 (finding 273)
         web = new WebView(this);
         web.setBackgroundColor(GROUND);
         WebSettings s = web.getSettings();
@@ -178,6 +182,13 @@ public class LauncherActivity extends Activity {
         setContentView(web);
         hideBars();
         web.loadUrl(BASE + "index.html");
+    }
+
+    /** The system WebView's package and version ("WebView com.google.android.webview 74.0.3729.186"):
+     *  the launcher's page needs Chromium 80 (ui/boot.js says so on the page; finding 273). */
+    static String webViewVersion() {
+        PackageInfo p = WebView.getCurrentWebViewPackage();
+        return p == null ? "WebView unknown" : "WebView " + p.packageName + " " + p.versionName;
     }
 
     /** One of the page's files from the APK's assets (launcher/...), else a refusal. */

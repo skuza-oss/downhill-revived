@@ -239,7 +239,8 @@ container (`xcrun simctl get_app_container <device> app.skuza.DownhillRevived da
 use. The app opens into the launcher; for checks, `SIMCTL_CHILD_DHD_IOS_DIRECT=1` starts the game at
 once and `SIMCTL_CHILD_DHD_LAUNCHER_TEST=<file in Documents>` runs the file's lines in the page
 (`wait SECONDS`, or a JavaScript expression such as `bridge.call('snapshot')`), each result in
-`Documents/launcher-test.log` (finding 227). Set `SDL_AUDIO_DRIVER=dummy` in the simulator's
+`Documents/launcher-test.log` (finding 227); `SIMCTL_CHILD_DHD_IOS_CHIP_TOO_OLD=1` shows the page an
+iPhone or iPad below the A12 gets (finding 273). Set `SDL_AUDIO_DRIVER=dummy` in the simulator's
 launchd environment (`xcrun simctl spawn <device> launchctl setenv ...`) to keep the game silent.
 
 `--unsigned` writes `build/ios/DownhillRevived-<version>-unsigned.ipa` (`package_unsigned.py`:
