@@ -80,9 +80,9 @@ pub fn spec_enabled() -> bool {
 /// The fragment specialisation of a draw (native.wgsl's `native_spec`): the shader path bits of
 /// `flags` (0-11), the CLAMP modes (12-15) and the alpha test (16-18), each with its given bit
 /// (31, 30, 29), `sized` (bit 19: the texture is exactly tex_size) and `unit_alpha` (bit 20: the
-/// draw's alpha_scale is 255). Bits a draw's path never reads are left zero, so draws that differ
-/// only there share a pipeline: an untextured draw has no texture state, a draw without the alpha
-/// test no test.
+/// draw's alpha_scale is 255), and flag 16384 (As as the colour, finding 276) as bit 21. Bits a
+/// draw's path never reads are left zero, so draws that differ only there share a pipeline: an
+/// untextured draw has no texture state, a draw without the alpha test no test.
 pub fn spec(flags: u32, wrap: [u32; 2], atst: u32, sized: bool, unit_alpha: bool) -> u32 {
     let textured = flags & 1 != 0;
     let mut f = flags & 0xFFF;
@@ -90,7 +90,7 @@ pub fn spec(flags: u32, wrap: [u32; 2], atst: u32, sized: bool, unit_alpha: bool
         f &= 16 | 64 | 128 | 512; // fog, alpha test and its failing pass, premultiply
     }
     // Each part with its "given" bit (31 flags, 30 CLAMP modes, 29 alpha test).
-    let mut bits = 1 << 31 | 1 << 30 | 1 << 29 | f;
+    let mut bits = 1 << 31 | 1 << 30 | 1 << 29 | f | (flags >> 14 & 1) << 21;
     if textured {
         bits |= (wrap[0] & 3) << 12 | (wrap[1] & 3) << 14 | (sized as u32) << 19 | (unit_alpha as u32) << 20;
     }
@@ -124,6 +124,7 @@ pub fn blend_factor(d3d: u32, dual: bool) -> wgpu::BlendFactor {
         6 => if dual { F::OneMinusSrc1Alpha } else { F::OneMinusSrcAlpha }, // D3D11_BLEND_INV_SRC_ALPHA
         7 => F::DstAlpha,                                                  // D3D11_BLEND_DEST_ALPHA
         8 => F::OneMinusDstAlpha,                                          // D3D11_BLEND_INV_DEST_ALPHA
+        9 => F::Dst,                                                       // D3D11_BLEND_DEST_COLOR (finding 276)
         14 => F::Constant,                                                 // D3D11_BLEND_BLEND_FACTOR
         15 => F::OneMinusConstant,                                         // D3D11_BLEND_INV_BLEND_FACTOR
         _ => F::One,

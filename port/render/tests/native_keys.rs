@@ -73,8 +73,16 @@ fn ok(key: u32) -> PipelineDesc {
     describe(key).unwrap_or_else(|e| panic!("key {key:#09x}: {e}"))
 }
 
-fn blend(src: u64, dst: u64, op: O) -> Option<BlendState> {
-    Some(BlendState { color: BlendComponent { src_factor: factor(src), dst_factor: factor(dst), operation: op },
+/// The recorded table's factor for a D3D11 number, with the one the C code never used and the
+/// Rust code has since added: D3D11_BLEND_DEST_COLOR (9), recorded as One, is Dst (a blend of
+/// Cd * As + Cd, finding 276).
+fn expected(d3d: u32, n: u64) -> F {
+    if d3d == 9 { F::Dst } else { factor(n) }
+}
+
+fn blend(key: u32, src: u64, dst: u64, op: O) -> Option<BlendState> {
+    Some(BlendState { color: BlendComponent { src_factor: expected(key >> 1 & 31, src),
+                                              dst_factor: expected(key >> 6 & 31, dst), operation: op },
                       alpha: BlendComponent::REPLACE })
 }
 
@@ -85,8 +93,9 @@ fn factors() {
     assert_eq!(factors.len(), 32);
     for (d3d, f) in factors.iter().enumerate() {
         assert_eq!(f.get("d3d").u(), d3d as u64);
-        assert_eq!(blend_factor(d3d as u32, false), factor(f.get("plain").u()), "D3D11 factor {d3d}, plain");
-        assert_eq!(blend_factor(d3d as u32, true), factor(f.get("dual").u()), "D3D11 factor {d3d}, dual");
+        let d3d = d3d as u32;
+        assert_eq!(blend_factor(d3d, false), expected(d3d, f.get("plain").u()), "D3D11 factor {d3d}, plain");
+        assert_eq!(blend_factor(d3d, true), expected(d3d, f.get("dual").u()), "D3D11 factor {d3d}, dual");
     }
 }
 
@@ -119,8 +128,8 @@ fn blend_keys() {
                 assert!(describe(dual).is_err(), "key {dual:#09x}: operation {} is refused", r[1]);
             }
             Some(op) => {
-                assert_eq!(ok(plain).color.blend, blend(r[2], r[3], op), "key {plain:#09x}");
-                assert_eq!(ok(dual).color.blend, blend(r[4], r[5], op), "key {dual:#09x} (dual)");
+                assert_eq!(ok(plain).color.blend, blend(k, r[2], r[3], op), "key {plain:#09x}");
+                assert_eq!(ok(dual).color.blend, blend(k, r[4], r[5], op), "key {dual:#09x} (dual)");
             }
         }
         // The same key with blending off: no blend state, whatever its fields (C ignores them).
