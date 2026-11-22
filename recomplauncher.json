@@ -7,7 +7,14 @@
         "label": "Your disc image (.iso) of the USA PlayStation 2 release, serial SCUS-97177.",
         "check": {
             "iso9660": "SCUS_971.77"
-        }
+        },
+        "dumps": [
+            {
+                "name": "USA (SCUS-97177)",
+                "size": 2530869248,
+                "crc32": "ceb74f42"
+            }
+        ]
     },
     "start": {
         "program": [
