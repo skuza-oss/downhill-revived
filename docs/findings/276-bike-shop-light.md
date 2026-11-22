@@ -65,4 +65,23 @@ Out of scope: the other blends `native_blend` still approximates (below, "Surpri
 
 ## Result
 
-Filled in at the merge.
+Changed: `port/gs/native_core.inc` (the Cd * (1 + As) case in `native_state`, `BLEND_DC`,
+`NATIVE_AS_COLOUR`), `port/gs/native.wgsl` (flag 16384 in `combine` and its spec bit 21),
+`port/render/src/native/pipelines.rs` (bit 21, factor 9 as `Dst`), `port/render/tests/native_keys.rs`
+(the factor 9 exception).
+
+Measured on the lane's base (05cccc24 renderer files) and the fix, native renderer, captures at
+fixed fields with `DHD_FRAME_CLOCK=1` and `DHD_CAPTURE_FIELDS` (hidden desktop):
+
+- the shop's list state, GT entry bike, fields 1600 and 2000: the light is there with Native VU on
+  and off and matches retail on PCSX2 (27704 pixels change, the banner's pool and the bike in it);
+- the rider select screen, fields 600-1500: equal to the base, pixel for pixel, Native VU on and off;
+- a race start (first track), fields 3400, 3700, 4200: about 230-330 pixels change, a small glint
+  by the rider drawn with the same blend; on those pixels the mean colour error against the Exact
+  renderer went from (-4.6, -3.2, -2.3) to (+0.5, +1.2, +3.1);
+- `state_trace_run.py boot` (600 fields) and `race` (5000) equal the base's (`state_diff.py` PASS);
+- `rustgs.py test -- --test native_keys --test native_spirv`, `check.py quick`, `check.py port`,
+  `check.py docs` pass.
+
+Left: `native_blend` still maps Cs * (1 + C) and Cd * (1 + Ad or FIX) to ONE; none of them was
+drawn in the runs above.
