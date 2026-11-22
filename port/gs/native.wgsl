@@ -29,9 +29,11 @@ override native_texel_scale: u32 = 0u;
 // test takes the uniform's size instead of asking the texture; bit 20 when a textured draw's
 // alpha_scale is 255 (every one native_core.inc makes), so a texel's alpha is its byte. Paths the draw never takes compile
 // away; the arithmetic of the paths it takes is the same. Zero: the generic pipeline, all from
-// the uniform.
+// the uniform. Bit 21 is flag 16384 (the colour is As, native_core.inc NATIVE_AS_COLOUR).
 override native_spec: u32 = 0u;
-fn draw_flags() -> u32 { return select(nat.flags, native_spec & 4095u, (native_spec & 0x80000000u) != 0u); }
+fn draw_flags() -> u32 {
+    return select(nat.flags, (native_spec & 4095u) | ((native_spec >> 7u) & 16384u), (native_spec & 0x80000000u) != 0u);
+}
 fn wrap_mode() -> vec2<u32> {
     return select(nat.wrap.xy, vec2<u32>(native_spec >> 12u & 3u, native_spec >> 14u & 3u), (native_spec & 0x40000000u) != 0u);
 }
@@ -322,6 +324,8 @@ fn combine(i: Varyings, t: vec4<f32>) -> vec4<f32> {
     }
     if ((flags & 16u) != 0u) { rgb = floor(mix(nat.fog.rgb, rgb, i.stqf.w)); }
     if ((flags & 512u) != 0u) { rgb = floor(rgb * a / 128.0); }
+    // Flag 16384: As as the colour, 128 as 255, for a blend of Cd * As + Cd (native_core.inc).
+    if ((flags & 16384u) != 0u) { rgb = vec3<f32>(min(a * 255.0 / 128.0, 255.0)); }
     return vec4<f32>(rgb, a);
 }
 

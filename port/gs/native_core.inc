@@ -81,6 +81,7 @@ typedef struct {
 } NativeConstants;
 enum { NATIVE_MESH = 4096, NATIVE_MESH_TWO_SIDED = 8192 };   /* constants.flags: a mesh draw (render.rs picks its
                                                               pipeline), drawn without back-face culling */
+enum { NATIVE_AS_COLOUR = 16384 };   /* constants.flags: the pixel's colour is As (native.wgsl combine) */
 
 typedef struct {
     uint64_t key;
@@ -947,7 +948,8 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
 
 /* ---- GS state to draw state ---- */
 
-enum { BLEND_ZERO = 1, BLEND_ONE = 2, BLEND_SA = 5, BLEND_ISA = 6, BLEND_DA = 7, BLEND_IDA = 8, BLEND_F = 14, BLEND_IF = 15 };
+enum { BLEND_ZERO = 1, BLEND_ONE = 2, BLEND_SA = 5, BLEND_ISA = 6, BLEND_DA = 7, BLEND_IDA = 8, BLEND_DC = 9, BLEND_F = 14,
+       BLEND_IF = 15 };
 
 /* GS blending ((A - B) * C >> 7) + D per colour, as factors of Cs and Cd: m * C + k. */
 static uint32_t native_blend(Native *n, uint64_t alpha)
@@ -1032,7 +1034,14 @@ static void native_state(Native *n, Gs *g, unsigned prim, unsigned ctxt)
         k->fog[0] = (float)(fog & 255); k->fog[1] = (float)(fog >> 8 & 255); k->fog[2] = (float)(fog >> 16 & 255);
     }
     if (test >> 14 & 1) n->stats.date_ignored++;
-    c->blend_key = prim & 64 ? native_blend(n, g->reg[GS_ALPHA_1 + ctxt]) : 0;
+    /* (Cd - 0) * As + Cd, Cd * (1 + As): no blend factor is 1 + As, so the shader gives As as its
+       colour and the blend takes it times Cd, plus Cd (the bike shop's spotlight over the banner,
+       finding 276; native_blend made it Cd, the light gone). As stops at 128 here, as a factor
+       does at 1. */
+    if (prim & 64 && (g->reg[GS_ALPHA_1 + ctxt] & 0xFF) == (1 | 2 << 2 | 0 << 4 | 1 << 6)) {
+        c->blend_key = 1 | BLEND_DC << 1 | BLEND_ONE << 6 | 1 << 11;
+        k->flags |= NATIVE_AS_COLOUR;    } else
+        c->blend_key = prim & 64 ? native_blend(n, g->reg[GS_ALPHA_1 + ctxt]) : 0;
     c->blend_fix = (uint32_t)(g->reg[GS_ALPHA_1 + ctxt] >> 32) & 255;
     /* Cs * As + Cd (or + 0): As reaches 2 on the GS but a blend factor stops at 1, so the shader
        premultiplies and the blend takes Cs as it is (sun halos and glows). */
