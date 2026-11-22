@@ -41,8 +41,9 @@ pub(crate) fn scoped<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<
 
 /// As `scoped`, for building one draw pipeline: a Validation and an Internal error scope. A
 /// pipeline the driver does not create is an internal error (the vendored wgpu-hal's
-/// `map_pipeline_creation_err`; PowerVR Rogue reports a shader its compilers refuse as out of
-/// memory, finding 176): Err, so that draw is not drawn and the game goes on.
+/// `map_pipeline_creation_err`: every result but VK_ERROR_DEVICE_LOST; PowerVR Rogue reports a
+/// shader its compilers refuse as out of memory, finding 176, PowerVR B-Series some pipelines as
+/// VK_ERROR_UNKNOWN, finding 278): Err, so that draw is not drawn and the game goes on.
 pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<R, String> {
     let _startup = crate::startup::step(what);
     #[cfg(feature = "native")]

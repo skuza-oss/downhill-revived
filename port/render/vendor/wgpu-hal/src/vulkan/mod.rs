@@ -1519,43 +1519,38 @@ fn map_host_oom_and_ioca_err(err: vk::Result) -> crate::DeviceError {
     map_host_oom_err(err)
 }
 
-/// Maps
-///
-/// - VK_ERROR_OUT_OF_HOST_MEMORY
-/// - VK_ERROR_OUT_OF_DEVICE_MEMORY
-/// - VK_PIPELINE_COMPILE_REQUIRED_EXT
-/// - VK_ERROR_INVALID_SHADER_NV
-fn map_pipeline_err(err: vk::Result) -> crate::DeviceError {
-    // We don't use VK_EXT_pipeline_creation_cache_control
-    // VK_PIPELINE_COMPILE_REQUIRED_EXT
-    // We don't use VK_NV_glsl_shader
-    // VK_ERROR_INVALID_SHADER_NV
-    map_host_device_oom_err(err)
-}
-
-/// Downhill Revived (finding 176): vkCreateGraphicsPipelines' and vkCreateComputePipelines'
-/// out-of-memory results are that pipeline's failure, a [`crate::PipelineError::Linkage`]
-/// (wgpu-core: an internal error), not a device error, which wgpu-core answers by losing the
-/// device. The Vulkan spec leaves the device usable after a failed pipeline creation, and
-/// PowerVR Rogue's driver (1.13) returns VK_ERROR_OUT_OF_HOST_MEMORY for every shader its
-/// compilers refuse. Other results stay device errors (`map_pipeline_err`).
-fn map_pipeline_creation_err(err: vk::Result, stages: wgt::ShaderStages) -> crate::PipelineError {
+/// Downhill Revived (findings 176, 278): a result of vkCreateGraphicsPipelines or
+/// vkCreateComputePipelines other than VK_ERROR_DEVICE_LOST is that pipeline's failure, a
+/// [`crate::PipelineError::Linkage`] (wgpu-core: an internal error of that pipeline) naming the
+/// result, not a device error, which wgpu-core answers by losing the device. The Vulkan spec leaves
+/// the device usable after a failed pipeline creation. PowerVR Rogue's driver (1.13) returns
+/// VK_ERROR_OUT_OF_HOST_MEMORY for every shader its compilers refuse (finding 176); PowerVR
+/// B-Series drivers return VK_ERROR_UNKNOWN for some pipelines (finding 278), which upstream maps to
+/// `DeviceError::Unexpected` and so loses the device ("Unexpected error variant").
+#[doc(hidden)]
+pub fn map_pipeline_creation_err(err: vk::Result, stages: wgt::ShaderStages) -> crate::PipelineError {
     match err {
-        vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
-            crate::PipelineError::Linkage(
-                stages,
-                alloc::format!("the driver did not create the pipeline ({err:?})"),
-            )
-        }
-        e => crate::PipelineError::Device(map_pipeline_err(e)),
+        vk::Result::ERROR_DEVICE_LOST => crate::PipelineError::Device(get_lost_err()),
+        e => crate::PipelineError::Linkage(
+            stages,
+            alloc::format!("the driver did not create the pipeline ({e:?})"),
+        ),
     }
 }
 
 /// Returns [`crate::DeviceError::Unexpected`] or panics if the `internal_error_panic`
 /// feature flag is enabled.
+///
+/// Downhill Revived (finding 278): logs the result (at most 8 times), which upstream drops, so a
+/// lost device's "Unexpected error variant" says what the driver returned.
 fn get_unexpected_err(_err: vk::Result) -> crate::DeviceError {
     #[cfg(feature = "internal_error_panic")]
     panic!("Unexpected Vulkan error: {_err:?}");
+
+    static LOGGED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+    if LOGGED.fetch_add(1, core::sync::atomic::Ordering::Relaxed) < 8 {
+        log::error!("Vulkan returned {_err:?} ({}), which wgpu-hal reports as an unexpected device error", _err.as_raw());
+    }
 
     #[allow(unreachable_code)]
     crate::DeviceError::Unexpected
