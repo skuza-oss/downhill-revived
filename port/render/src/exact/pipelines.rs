@@ -80,7 +80,7 @@ impl Pipelines {
         let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let memory = gpu.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         // A pipeline the driver did not create (the vendored wgpu-hal's map_pipeline_creation_err,
-        // finding 176).
+        // findings 176 and 278).
         let internal = gpu.device.push_error_scope(wgpu::ErrorFilter::Internal);
         let (shared, keyed) = build(gpu, raster_flags);
         let i = internal.pop().await;

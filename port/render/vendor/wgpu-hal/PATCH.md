@@ -100,7 +100,18 @@ error of that pipeline), not a `DeviceError::OutOfMemory`, which wgpu-core answe
 device. The Vulkan spec leaves the device usable after a failed pipeline creation, and PowerVR
 Rogue's driver 1.13 returns VK_ERROR_OUT_OF_HOST_MEMORY for every shader its compilers refuse. The
 temporary shader modules are destroyed on that path too (upstream returns before destroying them).
-Other results keep upstream's mapping.
+
+Since finding 278 every result but VK_ERROR_DEVICE_LOST is the pipeline's `Linkage` error, named in
+its message (`the driver did not create the pipeline (ERROR_UNKNOWN)`): upstream maps any other
+result to `DeviceError::Unexpected`, which wgpu-core also answers by losing the device ("Unexpected
+error variant (driver implementation is at fault)"; gfx-rs/wgpu issue #10027). PowerVR B-Series
+drivers return VK_ERROR_UNKNOWN from vkCreateGraphicsPipelines for some pipelines (issue #119; the
+BXM-8-256 in openOMSI issue #1990). VK_ERROR_DEVICE_LOST stays a lost device.
+
+## The result behind "Unexpected" in the log (finding 278)
+
+`mod.rs` `get_unexpected_err` logs the Vulkan result it turns into `DeviceError::Unexpected` (an
+error line, at most 8 per process); upstream drops it.
 
 ## Timeline submit info: a value for every semaphore (finding 201)
 
