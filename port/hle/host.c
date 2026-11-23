@@ -8,6 +8,7 @@
 #include "timer.h"
 #include "state_trace.h"
 #include "pace_grid.h"
+#include "pace_holds.h"
 #include "stick.h"
 #include "controls_table.h"  /* the bindings' tables (port/render/settings, finding 157) */
 #include "../gs/button_icons.h"
@@ -1749,29 +1750,13 @@ void pacing_handed(double *due, double *began, double *handed)
     *handed = handed_time;
 }
 
-enum { HOLD_RING = 8 };
+/* The presenter's holds and the parts of them a waiting picture sat through (pace_holds.h): the
+   presenter's thread only (pacing_present, pacing_waited). */
+static PaceHolds holds;
 
-/* The presenter's last holds (its waits for a picture's due), the presenter's thread only, and how
-   much of them fell after `from` (and before `to`): time a picture handed on at `from` spent
-   waiting behind the pictures before it. */
-static double hold_from[HOLD_RING], hold_to[HOLD_RING];
-static unsigned hold_next;
-
-static void hold_note(double from, double to)
-{
-    unsigned i = hold_next++ % HOLD_RING;
-    hold_from[i] = from, hold_to[i] = to;
-}
-
-static double held_since(double from, double to)
-{
-    double held = 0;
-    for (unsigned i = 0; i < HOLD_RING; i++) {
-        double a = hold_from[i] > from ? hold_from[i] : from, b = hold_to[i] < to ? hold_to[i] : to;
-        if (b > a) held += b - a;
-    }
-    return held;
-}
+/* The native renderer's thread took a picture that had waited for it since `from` (drawn by the GS
+   worker): the holds in that time delayed it, and every picture queued behind it. */
+void pacing_waited(double from, double to) { pace_holds_waited(&holds, from, to); }
 
 /* The presenter, just before it presents a picture pacing_handed described: notes how long the
    frame took, then waits for the due time, and at least a field after its last picture. */
@@ -1784,8 +1769,10 @@ void pacing_present(double due, double began, double handed)
         if (began > 0 && now > began) {
             /* The time this picture waited behind pictures held for their due is no work: left in,
                a queue before the presenter read as frames longer than a field and kept a fast PC in
-               the slow stretch, where the queue never drained (finding 280). */
-            double work = now - began - (handed > 0 ? held_since(handed, now) : 0);
+               the slow stretch, where the queue never drained (finding 280). Only holds a waiting
+               picture sat through count (pace_holds.h): one while the GS worker still works on the
+               next picture costs that picture nothing. */
+            double work = now - began - (handed > 0 ? pace_holds_blocked(&holds, handed, now) : 0);
             unsigned i = work_count;
             work_ms[i % WORK_SAMPLES] = (float)(work * 1000);
             work_count = i + 1;
@@ -1796,7 +1783,7 @@ void pacing_present(double due, double began, double handed)
         if (target > now && target < now + 0.05) {
             host_wait_wall(target);
             double woke = host_wall_seconds();
-            hold_note(now, woke < target ? woke : target);  /* a late wake is the thread's, not the hold's */
+            pace_holds_hold(&holds, now, target, woke);  /* a late wake is the thread's, not the hold's */
         }
         last_at = host_wall_seconds();
         last_late = late;

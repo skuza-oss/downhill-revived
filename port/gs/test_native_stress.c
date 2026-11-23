@@ -28,6 +28,7 @@ void host_end_add(int stage, const char *name, void (*fn)(void)) { (void)stage; 
 void host_putenv_s(const char *name, const char *value) {_putenv_s(name, value);}
 void pacing_handed(double *d,double *b,double *h) {*d=*b=*h=0;}
 void pacing_present(double d,double b,double h) {(void)d;(void)b;(void)h;}
+void pacing_waited(double f,double t) {(void)f;(void)t;}
 void input_latency_presented(void) {}
 int host_widescreen_flat_limit(void) {return 1000;}
 int host_widescreen_card_drawn(void) {return 0;}
