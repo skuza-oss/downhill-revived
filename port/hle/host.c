@@ -1795,7 +1795,8 @@ void pacing_present(double due, double began, double handed)
         if (last_at + spacing > target) target = last_at + spacing;
         if (target > now && target < now + 0.05) {
             host_wait_wall(target);
-            hold_note(now, host_wall_seconds());
+            double woke = host_wall_seconds();
+            hold_note(now, woke < target ? woke : target);  /* a late wake is the thread's, not the hold's */
         }
         last_at = host_wall_seconds();
         last_late = late;
