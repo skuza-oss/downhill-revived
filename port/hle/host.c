@@ -1859,7 +1859,7 @@ void pacing_present(double due, double began)
 
 /* DHD_INPUT_LATENCY=1 (finding 280): where a press of player 1 (controller or keyboard) waits on its
    way to the screen. One sample at a time, at most one every 0.3 s, 400 lines a run:
-     input latency: field F (+N to its picture): host to the game's read A ms | read to the picture
+     input latency: field F (riding|menus, menu M; +N to its picture): host to the game's read A ms | read to the picture
      handed on B | to the presenter C | held to its due D | present E | read to presented T ms |
      then the display's next refresh in R ms (DWM, Windows)
    "host" is when SDL took the key or button from the system (the event's time stamp); the game's
@@ -1873,7 +1873,7 @@ static volatile double latency_seen_at;     /* SDL's thread: the newest press, u
 static struct {
     double seen, take, handed, began, ready, call;
     uint64_t field, picture;
-    int lines;
+    int menu, riding, lines;
 } lat;
 static atomic_int lat_state;  /* 0 none, 1 read (EE), 2 handed on (EE), 3 at the presenter (render thread) */
 
@@ -1898,10 +1898,14 @@ static void latency_take(const HostPad *in)
     __atomic_exchange(&latency_seen_at, &none, &seen, __ATOMIC_ACQ_REL);
     int state = atomic_load(&lat_state);
     if (state && now - lat.take > 1) atomic_store(&lat_state, state = 0);  /* never presented (minimised) */
+    /* the field's last read is the one the game takes: pad_refresh after the just-in-time wait */
+    if (state == 1 && kernel_vsync_count == lat.field) lat.take = now;
     if (!pressed || state || now - lat.take < 0.3 || lat.lines >= 400) return;
     lat.seen = seen > 0 && seen <= now && now - seen < 0.5 ? seen : now;
     lat.take = now;
     lat.field = kernel_vsync_count;
+    lat.menu = *(volatile int32_t *)GUEST(0x0829DED8);  /* the shell's menu word (kernel.c's stall line) */
+    lat.riding = riding_controls();
     atomic_store(&lat_state, 1);
 }
 
@@ -1964,9 +1968,10 @@ void input_latency_presented(void)
     if (refresh > 0)
         snprintf(display, sizeof display, " | then the display's next refresh in %.1f ms (DWM, %.2f Hz)", (refresh - done) * 1e3,
                  1 / period);
-    hle_log("input latency: field %llu (+%llu to its picture): host to the game's read %.1f ms | read to the picture handed on "
-            "%.1f | to the presenter %.1f | held to its due %.1f | present %.1f | read to presented %.1f ms%s\n",
-            (unsigned long long)lat.field, (unsigned long long)(lat.picture - lat.field), (lat.take - lat.seen) * 1e3,
+    hle_log("input latency: field %llu (%s, menu %d; +%llu to its picture): host to the game's read %.1f ms | read to the "
+            "picture handed on %.1f | to the presenter %.1f | held to its due %.1f | present %.1f | read to presented %.1f ms%s\n",
+            (unsigned long long)lat.field, lat.riding ? "riding" : "menus", lat.menu,
+            (unsigned long long)(lat.picture - lat.field), (lat.take - lat.seen) * 1e3,
             (lat.handed - lat.take) * 1e3, (lat.ready - lat.handed) * 1e3, (lat.call - lat.ready) * 1e3,
             (done - lat.call) * 1e3, (done - lat.take) * 1e3, display);
     lat.lines++;
