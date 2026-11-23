@@ -216,14 +216,14 @@ static void screen_update(SDL_Window *window)
 #endif
     SDL_LockMutex(lock);
     if (!screen_known || memcmp(&s, &screen, sizeof s)) {
+        /* every change in dhd.log on phones (finding 277): where the gesture strips and the cutout are
+           decides where the controls go, and a player's report should say so without a question */
 #ifdef TOUCH_IOS
-        if (trace_on())
-            fprintf(stderr, "touch log: screen %.1f x %.1f mm, strips %.1f %.1f %.1f %.1f, cutout %.1f %.1f %.1f %.1f mm\n",
+        fprintf(stderr, "touch log: screen %.1f x %.1f mm, strips %.1f %.1f %.1f %.1f, cutout %.1f %.1f %.1f %.1f mm\n",
                     s.width, s.height, s.strip_left, s.strip_top, s.strip_right, s.strip_bottom,
                     s.cut_x0, s.cut_y0, s.cut_x1, s.cut_y1);
 #elif defined(__ANDROID__)
-        if (trace_on())
-            fprintf(stderr, "touch log: screen %dx%d px, dpi %.1f x %.1f, gesture insets %d %d %d %d, cutout %d %d %d %d px\n",
+        fprintf(stderr, "touch log: screen %dx%d px, dpi %.1f x %.1f, gesture insets %d %d %d %d, cutout %d %d %d %d px\n",
                     w, h, xdpi, ydpi, in[0], in[1], in[2], in[3], in[4], in[5], in[6], in[7]);
 #endif
         screen = s;
@@ -837,9 +837,11 @@ void host_service_touch_field(uint32_t address)
         float kx = 0, ky = 0, khw = 0, khh = 0;
         if (!own && touch_menu_keeps(touch, &kx, &ky, &khw, &khh))   /* MORE: the game's pause menu (finding 274) */
             fprintf(stderr, "touch: the game's pause menu takes the touches; Pause stays at %.1f,%.1f mm\n", kx, ky);
-        else if (own && touch_control(touch, TC_PAUSE, &kx, &ky, NULL))   /* where Pause is (the checks tap it) */
+        else if (own && touch_control(touch, TC_PAUSE, &kx, &ky, NULL)) {   /* where Pause is (the checks tap it) */
             fprintf(stderr, "touch: the overlay takes the touches (Pause at %.1f,%.1f mm)\n", kx, ky);
-        else fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
+            if (touch_control(touch, TC_CAMERA, &kx, &ky, NULL))   /* and the camera (finding 277) */
+                fprintf(stderr, "touch: the camera button at %.1f,%.1f mm\n", kx, ky);
+        } else fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
     }
     SDL_SetAtomicInt(&owns, own);
     publish();

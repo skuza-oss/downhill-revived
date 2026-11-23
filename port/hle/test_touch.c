@@ -199,6 +199,59 @@ static void stall(double ms)
     game.race_ms += ms;
 }
 
+/* The camera (finding 277, issue #121): SELECT alone changes no view; the game's camera is SELECT held +
+   d-pad Up. A camera press alone ends as SELECT + Up for PRESS_FIELDS, SELECT held throughout (one
+   SELECT: no bail); a press the game never read goes as both at once; a press combined with another
+   (L2's look back, PEDAL) stays SELECT alone. */
+static void test_camera_step(void)
+{
+    float x, y, ox, oy;
+    for (int classic = 0; classic < 2; classic++) {
+        start(classic ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        fields(40);
+        at(TC_CAMERA, &x, &y);
+        touch_down(t, 1, x, y, now);
+        int selects = 0, ups = 0, up_with_select = 1, select_gap = 0, was = 0, first_up = -1;
+        for (int i = 0; i < 40; i++) {
+            if (i == 6) touch_up(t, 1, x, y, now);
+            field();
+            uint16_t b = buttons();
+            int sel = (b & PAD_SELECT) != 0;
+            if (sel && !was) selects++;
+            if (!sel && was && i < 6) select_gap = 1;
+            if (b & PAD_UP) { ups++; if (first_up < 0) first_up = i; if (!sel) up_with_select = 0; }
+            was = sel;
+        }
+        CHECK(selects == 1 && !select_gap && up_with_select && first_up >= 6 && ups >= 3 && ups <= 4);
+        CHECK(!(buttons() & (PAD_SELECT | PAD_UP)));
+        /* a tap the game never read (down and up before the next pad read): SELECT and Up together, once */
+        fields(40);
+        touch_down(t, 2, x, y, now);
+        touch_up(t, 2, x, y, now + 5);
+        int at_field[4];
+        CHECK(presses(PAD_SELECT | PAD_UP, 10, at_field, 4) == 1);
+        fields(40);
+        touch_down(t, 3, x, y, now);
+        touch_up(t, 3, x, y, now + 5);
+        field();
+        CHECK((buttons() & (PAD_SELECT | PAD_UP)) == (PAD_SELECT | PAD_UP));
+        /* combined with another press: SELECT alone, no Up (look back is SELECT + L2) */
+        fields(40);
+        int other = classic ? TC_LBAR : TC_PEDAL;
+        at(other, &ox, &oy);
+        touch_down(t, 4, x, y, now);
+        fields(3);
+        touch_down(t, 5, ox, oy, now);
+        fields(4);
+        touch_up(t, 5, ox, oy, now);
+        fields(3);
+        touch_up(t, 4, x, y, now);
+        int up = 0;
+        for (int i = 0; i < 20; i++) { field(); if (buttons() & PAD_UP) up = 1; }
+        CHECK(!up && !(buttons() & PAD_SELECT));
+    }
+}
+
 /* Taps the game never read before their lift (down and up drained before the next pad read: a
    quick tap, a stall) still reach the game: PEDAL, Classic's ✕, the camera's SELECT (Sol's round-2
    #2), and a double tap stays two presses with a release between them. */
@@ -3030,6 +3083,7 @@ int main(void)
     test_flick();
     test_quick_tap();
     test_unread_taps();
+    test_camera_step();
     test_air_wait_tap();
     test_sprint_guards();
     test_pause();
