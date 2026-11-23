@@ -17,7 +17,8 @@
      camera press with nothing else pressed while it was down holds SELECT for PRESS_FIELDS past
      its lift (one press: no bail) and asks for the next view (touch_take_camera_step): the game's
      camera alone takes it, never the rider's Up, which the air pitch reads too. With another press
-     (L2: look back, the D-pad's Up / Down) it stays SELECT alone (finding 277).
+     (L2: look back, the D-pad's Up / Down), noted as the touches come (camera_chord, a down and
+     up in one batch too), it stays SELECT alone (finding 277).
    - A press the game hasn't read yet when its finger lifts (down and up between two pad reads, a
      stall, a held-back or waiting press) still goes, for PRESS_FIELDS; a later press of the same
      buttons waits for its release, so a double tap stays two presses (the windows above apply).
@@ -2223,6 +2224,25 @@ static void hint_touch(Touch *t, Finger *f)
     if (t->freeze && (f->job == JOB_PEDAL)) t->freeze = 0;
 }
 
+/* The camera finger down while another press is down or going out (a button, PEDAL, whether sent
+   yet or waiting, the D-pad, the trick stick, a pulse): the player combines SELECT with it (look
+   back, the camera by the D-pad), so its lift asks for no step. Run at every touch down, at the
+   camera's release and at each update, so a down and an up drained in one batch count too. */
+static void camera_chord(Touch *t)
+{
+    uint16_t others = (uint16_t)(t->dpad_out | t->dpad_buttons | (t->trick.on ? t->trick.sent : 0));
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        const Finger *g = &t->f[i];
+        if (g->used && g->control != TC_CAMERA && (g->job == JOB_BUTTON || g->job == JOB_PEDAL)) others |= g->buttons;
+    }
+    for (int i = 0; i < 16; i++) others |= t->pulse_buttons[i];
+    if (!others) return;
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        Finger *f = &t->f[i];
+        if (f->used && !f->lifted && f->job == JOB_BUTTON && f->control == TC_CAMERA) f->with_other = 1;
+    }
+}
+
 void touch_down(Touch *t, long long id, float x, float y, double now)
 {
     t->now = now;
@@ -2273,6 +2293,7 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
     if (t->set.preset == TOUCH_CLASSIC) route_classic(t, f);
     else route_thumb(t, f);
     hint_touch(t, f);
+    camera_chord(t);
 }
 
 static void stick_follow(Touch *t, Finger *f)
@@ -2338,6 +2359,7 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
     Finger *f = finger_of(t, id);
     if (!f) return;
     f->x = x, f->y = y;
+    if (f->job == JOB_BUTTON && f->control == TC_CAMERA) camera_chord(t);   /* what is down at its release counts */
     if (f->job == JOB_PANEL) {
         if (t->pause != PAUSE_NONE) {   /* row taps fire on lift, on the row they started on */
             if (t->pause == PAUSE_CONTROLS) pause_row_tapped(t, 0);
@@ -2751,23 +2773,6 @@ static void race_clock_back(Touch *t, double delta)
     #undef SHIFT
 }
 
-/* The camera finger down while another press goes out (a button, PEDAL, the D-pad, the trick stick):
-   the player combines SELECT with it (look back, the camera by the D-pad), so its lift asks for no step. */
-static void camera_mark(Touch *t)
-{
-    uint16_t others = (uint16_t)(t->dpad_out | t->dpad_buttons | (t->trick.on ? t->trick.sent : 0));
-    for (int i = 0; i < TOUCH_FINGERS; i++) {
-        const Finger *g = &t->f[i];
-        if (g->used && g->sent && g->control != TC_CAMERA && (g->job == JOB_BUTTON || g->job == JOB_PEDAL)) others |= g->buttons;
-    }
-    for (int i = 0; i < 16; i++) others |= t->pulse_buttons[i];
-    if (!others) return;
-    for (int i = 0; i < TOUCH_FINGERS; i++) {
-        Finger *f = &t->f[i];
-        if (f->used && !f->lifted && f->job == JOB_BUTTON && f->control == TC_CAMERA) f->with_other = 1;
-    }
-}
-
 /* Each update, first: presses waiting for an older lifted press of their buttons start once that
    one is gone (its release was in the last field's pad), by their own rule; then the lifted
    presses that were in PRESS_FIELDS pad reads end (or at once while paused: the pause took them). */
@@ -2867,7 +2872,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         trick_tick(t);
     }
     due_presses(t);
-    camera_mark(t);
+    camera_chord(t);
     cross_track(t);
     tilt_step(t);
     hints_step(t);

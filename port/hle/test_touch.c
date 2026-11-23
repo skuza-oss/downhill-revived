@@ -204,7 +204,7 @@ static void stall(double ms)
    asks the game's camera for the next view (touch_take_camera_step) in the field that SELECT goes
    out, after the bail window too; it never sends Up, which the race also reads as the air pitch
    (func_0012DFD0: a step in a jump would tilt the bike). A press combined with another (L2's look
-   back, PEDAL) asks for none. */
+   back, PEDAL), even a down and an up drained in one batch, asks for none. */
 typedef struct { int selects, select_gap, ups, steps, step_at, step_with_select, edge_at, held_after; } CameraRun;
 static CameraRun camera_fields(int n, int lift_at, long long id, float x, float y)
 {
@@ -262,6 +262,23 @@ static void test_camera_step(void)
         fields(3);
         r = camera_fields(20, 0, 4, x, y);
         CHECK(!r.ups && !r.steps && !(buttons() & PAD_SELECT));
+        /* the other held, the camera's down and up drained in one batch (no update between): no step */
+        fields(40);
+        touch_down(t, 6, ox, oy, now);
+        fields(3);
+        touch_down(t, 7, x, y, now);
+        touch_up(t, 7, x, y, now + 5);
+        r = camera_fields(20, -1, 0, 0, 0);
+        CHECK(r.selects == 1 && !r.ups && !r.steps);
+        touch_up(t, 6, ox, oy, now);
+        /* all four in one batch (camera down, other down, other up, camera up): no step */
+        fields(40);
+        touch_down(t, 8, x, y, now);
+        touch_down(t, 9, ox, oy, now + 2);
+        touch_up(t, 9, ox, oy, now + 4);
+        touch_up(t, 8, x, y, now + 6);
+        r = camera_fields(20, -1, 0, 0, 0);
+        CHECK(!r.ups && !r.steps);
     }
 }
 
