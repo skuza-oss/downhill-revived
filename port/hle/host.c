@@ -1862,7 +1862,7 @@ void pacing_present(double due, double began)
      input latency: field F (riding|menus, menu M; +N to its picture): host to the game's read A ms | read to the picture
      handed on B | to the presenter C | held to its due D | present E | read to presented T ms |
      then the display's next refresh in R ms (DWM, Windows)
-   "host" is when SDL took the key or button from the system (the event's time stamp); the game's
+   "host" is when SDL's thread handed the key or button on (sdl_host.c's dispatch); the game's
    read is the field's last pad read before the EE runs its frame (pad_refresh after the
    just-in-time wait, else pad_vsync); the picture is the first one handed on after that read (the
    first the game could draw from it). What the game itself takes before a press shows (its own
