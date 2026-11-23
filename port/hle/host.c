@@ -1746,6 +1746,57 @@ void pacing_handed(double *due, double *began)
     *began = handed_began;
 }
 
+/* When each of the last pictures was handed on at its VBLANK, by the pad read it was made from
+   (began): the EE thread writes (handed_note), the presenter reads its own picture's (handed_at). A
+   slot is written with began 0 first, so a reader that meets a slot being written finds no match. */
+enum { HANDED_RING = 8, HOLD_RING = 8 };
+static volatile double handed_ring_began[HANDED_RING], handed_ring_at[HANDED_RING];
+static unsigned handed_ring_next;  /* EE thread */
+
+static void handed_note(double began, double at)
+{
+    unsigned i = handed_ring_next++ % HANDED_RING;
+    handed_ring_began[i] = 0;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    handed_ring_at[i] = at;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    handed_ring_began[i] = began;
+}
+
+static double handed_at(double began)
+{
+    for (unsigned i = 0; i < HANDED_RING; i++) {
+        double b = handed_ring_began[i];
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        double at = handed_ring_at[i];
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (b == began && handed_ring_began[i] == b) return at;
+    }
+    return 0;
+}
+
+/* The presenter's last holds (its waits for a picture's due), the presenter's thread only, and how
+   much of them fell after `from` (and before `to`): time a picture handed on at `from` spent
+   waiting behind the pictures before it. */
+static double hold_from[HOLD_RING], hold_to[HOLD_RING];
+static unsigned hold_next;
+
+static void hold_note(double from, double to)
+{
+    unsigned i = hold_next++ % HOLD_RING;
+    hold_from[i] = from, hold_to[i] = to;
+}
+
+static double held_since(double from, double to)
+{
+    double held = 0;
+    for (unsigned i = 0; i < HOLD_RING; i++) {
+        double a = hold_from[i] > from ? hold_from[i] : from, b = hold_to[i] < to ? hold_to[i] : to;
+        if (b > a) held += b - a;
+    }
+    return held;
+}
+
 /* The presenter, just before it presents a picture pacing_handed described: notes how long the
    frame took, then waits for the due time, and at least a field after its last picture. */
 void pacing_present(double due, double began)
@@ -1755,15 +1806,21 @@ void pacing_present(double due, double began)
     double now = host_wall_seconds(), target = due;
     if (due > 0) {
         if (began > 0 && now > began) {
+            /* The time this picture waited behind pictures held for their due is no work: left in,
+               a queue before the presenter read as frames longer than a field and kept a fast PC in
+               the slow stretch, where the queue never drained (finding 280). */
+            double handed = handed_at(began), work = now - began - (handed > 0 ? held_since(handed, now) : 0);
             unsigned i = work_count;
-            work_ms[i % WORK_SAMPLES] = (float)((now - began) * 1000);
+            work_ms[i % WORK_SAMPLES] = (float)(work * 1000);
             work_count = i + 1;
         }
         int late = now > due;  /* this or the last picture late: a whole period after the last */
         double spacing = FIELD_SECONDS - (late || last_late ? 0 : pacing_slack);
         if (last_at + spacing > target) target = last_at + spacing;
-        if (target > now && target < now + 0.05)
+        if (target > now && target < now + 0.05) {
             host_wait_wall(target);
+            hold_note(now, host_wall_seconds());
+        }
         last_at = host_wall_seconds();
         last_late = late;
         shown_due = 0;  /* a reader sees due 0 or all three values: the fences keep the order */
@@ -1921,6 +1978,7 @@ void host_pacing_handoff(int fresh)
 {
     handed_due = fresh ? jit_due : 0;
     handed_began = frame_began;
+    if (fresh) handed_note(frame_began, host_wall_seconds());  /* pacing_present's work samples */
     if (latency_on()) latency_handoff();
 }
 void host_pacing_input(void) { frame_began=host_wall_seconds(); }
