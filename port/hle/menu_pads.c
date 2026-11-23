@@ -50,7 +50,8 @@ int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLege
 {
     static const struct { char glyph; uint16_t button; } glyphs[] = {
         {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE},
-        {GLYPH_LEFT[0], PAD_LEFT}, {GLYPH_RIGHT[0], PAD_RIGHT}, {GLYPH_R1[0], PAD_R1}};   /* PREV / NEXT, R1 (finding 274) */
+        {GLYPH_LEFT[0], PAD_LEFT}, {GLYPH_RIGHT[0], PAD_RIGHT}, {GLYPH_R1[0], PAD_R1},   /* PREV / NEXT, R1 (finding 274) */
+        {GLYPH_UP[0], PAD_UP}, {GLYPH_DOWN[0], PAD_DOWN}};   /* the legend bar's PREV / NEXT on up/down lists (finding 277) */
     int at[MENU_LEGEND_BUTTONS], n = 0;
     uint16_t button[MENU_LEGEND_BUTTONS];
     for (int i = 0; i < length && n < max && n < MENU_LEGEND_BUTTONS; i++)

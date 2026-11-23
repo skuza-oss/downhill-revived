@@ -10,8 +10,9 @@
      touch_hud_move).
    Besides those, the race clock (D_0043EEC8, the double-tap windows count it) and, for the pause
    rows' ↓ steps, the rows the game's pause menu builds (func_0015E238's own conditions, a menu
-   read). Out: where the HUD goes, the online panel's Leave race, and the trick-stick hint's hold:
-   the game waits here, then forgets the stall (no game time is caught up after it). */
+   read). Out: where the HUD goes, the online panel's Leave race, the camera button's step (the
+   next view, taken by view 0's camera alone: port_touch_camera_step) and the trick-stick hint's
+   hold: the game waits here, then forgets the stall (no game time is caught up after it). */
 #include "hle.h"
 #include "../include/fps.h"
 #include "menu_page.h"
@@ -30,12 +31,26 @@ enum {
     RIDER_AIR = 0x2AF2C0 + 0x4564,
     RACE_STATE = 0x4B25A0,     /* D_004B25A0: +0x10C the mode, +0x110, +0x288 */
     SAVE = 0x4225A0,           /* D_004225A0: the save's +0x12199, +0x1219F */
-    RECORDER = 0x43F9F0        /* D_0043F9F0: the race recorder; +0x44 playing (a replay; func_001A8958 clears it at each race) */
+    RECORDER = 0x43F9F0,       /* D_0043F9F0: the race recorder; +0x44 playing (a replay; func_001A8958 clears it at each race) */
+    VIEW0_CAMERA = 0x37EA60,   /* view 0's camera (func_0014CC38's object for player 1's view) */
+    CAMERA_STEP_FIELDS = 8     /* a step not taken in this many fields is dropped */
 };
 
 int touch_hud_place;    /* widescreen.c: 0 the game's HUD, 1 moved for the right hand, 2 for the left */
 int touch_hud_seen;   /* widescreen.c's HUD hooks: the race HUD was drawn since the last field */
 static int pending;    /* a TOUCH_COMMAND_* from the TOUCH CONTROLS pages */
+static int camera_step_fields;   /* the camera button's step waits this many more fields (finding 277) */
+
+/* The touch camera button's step (finding 277, issue #121): the game's camera (func_0014CC38)
+   takes the next view on SELECT held + the rider's Up, and the race's air pitch (func_0012DFD0)
+   reads the same Up as full lean, so the overlay never sends Up: the patched camera read asks here
+   instead, while SELECT is held (the overlay holds it past the lift). View 0's camera only, once. */
+int port_touch_camera_step(void *camera)
+{
+    if (!camera_step_fields || camera != (void *)(uintptr_t)(0x08000000u + VIEW0_CAMERA)) return 0;
+    camera_step_fields = 0;
+    return 1;
+}
 
 void port_online_touch_leave(void);   /* online.c */
 extern uint64_t kernel_vsync_count;
@@ -126,6 +141,8 @@ void touch_field(void)
     pending = 0;
     host_service_touch_field(GADDR(&h));
     touch_hud_place = h.hud_mode;
+    if (camera_step_fields) camera_step_fields--;
+    if (h.camera_step) camera_step_fields = CAMERA_STEP_FIELDS;
     if (h.leave_race) port_online_touch_leave();
     if (!h.freeze) return;
     /* the trick stick's hint: the game waits for the first push (or a lift, PEDAL, Back, 5 s) */

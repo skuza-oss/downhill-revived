@@ -12,6 +12,13 @@
      flicks; it waits for the window to close when the overlay itself let ✕ up, or HOP, SLIDE or
      the trick stick was opened and released since ✕ went up, or the race just resumed.
    - Camera (SELECT): a second press inside the game's SELECT double-press window (bail) waits.
+     SELECT alone changes no camera: the game's camera is SELECT held + d-pad Up (the next view:
+     default, close, first person, far, default ...) or Down, and the touch stick is no d-pad. So a
+     camera press with nothing else pressed while it was down holds SELECT for PRESS_FIELDS past
+     its lift (one press: no bail) and asks for the next view (touch_take_camera_step): the game's
+     camera alone takes it, never the rider's Up, which the air pitch reads too. With another press
+     (L2: look back, the D-pad's Up / Down), noted as the touches come (camera_chord, a down and
+     up in one batch too), it stays SELECT alone (finding 277).
    - A press the game hasn't read yet when its finger lifts (down and up between two pad reads, a
      stall, a held-back or waiting press) still goes, for PRESS_FIELDS; a later press of the same
      buttons waits for its release, so a double tap stays two presses (the windows above apply).
@@ -209,6 +216,8 @@ typedef struct {
     int lifted;                /* lifted before the game read its press: kept until it has (finger_of skips it) */
     uint32_t lift_until;       /* lifted and shown: the VBLANK its press ends */
     int after_lift;            /* waits for an older lifted press of the same buttons to be let up first */
+    int with_other;            /* the camera: another press came while it was down (finding 277) */
+    int camera_step;           /* the camera: its lifted SELECT asks for the next view when it goes out */
 } Finger;
 
 typedef struct {
@@ -318,6 +327,7 @@ struct Touch {
     unsigned downs;            /* touch-downs so far (Finger.order) */
     char note[320];            /* touch_take_note's line */
     int note_ready, rescue_noted;   /* a line waits; the steering rescue was logged (once a run) */
+    int camera_step;           /* the camera button asks for the next view (touch_take_camera_step) */
 };
 
 static const uint16_t SECTOR_BUTTONS[8] = {
@@ -2214,6 +2224,25 @@ static void hint_touch(Touch *t, Finger *f)
     if (t->freeze && (f->job == JOB_PEDAL)) t->freeze = 0;
 }
 
+/* The camera finger down while another press is down or going out (a button, PEDAL, whether sent
+   yet or waiting, the D-pad, the trick stick, a pulse): the player combines SELECT with it (look
+   back, the camera by the D-pad), so its lift asks for no step. Run at every touch down, at the
+   camera's release and at each update, so a down and an up drained in one batch count too. */
+static void camera_chord(Touch *t)
+{
+    uint16_t others = (uint16_t)(t->dpad_out | t->dpad_buttons | (t->trick.on ? t->trick.sent : 0));
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        const Finger *g = &t->f[i];
+        if (g->used && g->control != TC_CAMERA && (g->job == JOB_BUTTON || g->job == JOB_PEDAL)) others |= g->buttons;
+    }
+    for (int i = 0; i < 16; i++) others |= t->pulse_buttons[i];
+    if (!others) return;
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        Finger *f = &t->f[i];
+        if (f->used && !f->lifted && f->job == JOB_BUTTON && f->control == TC_CAMERA) f->with_other = 1;
+    }
+}
+
 void touch_down(Touch *t, long long id, float x, float y, double now)
 {
     t->now = now;
@@ -2264,6 +2293,7 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
     if (t->set.preset == TOUCH_CLASSIC) route_classic(t, f);
     else route_thumb(t, f);
     hint_touch(t, f);
+    camera_chord(t);
 }
 
 static void stick_follow(Touch *t, Finger *f)
@@ -2329,6 +2359,7 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
     Finger *f = finger_of(t, id);
     if (!f) return;
     f->x = x, f->y = y;
+    if (f->job == JOB_BUTTON && f->control == TC_CAMERA) camera_chord(t);   /* what is down at its release counts */
     if (f->job == JOB_PANEL) {
         if (t->pause != PAUSE_NONE) {   /* row taps fire on lift, on the row they started on */
             if (t->pause == PAUSE_CONTROLS) pause_row_tapped(t, 0);
@@ -2351,7 +2382,22 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
         int c = control_at(t, f->x0, f->y0, ground, 3);
         if (c >= 0) pulse(t, c == TC_HOP ? PAD_R2 : c == TC_BRAKE ? PAD_TRIANGLE : PAD_L3, PRESS_FIELDS);
         if (c == TC_HOP) t->last_hop_race = race_ms(t);
-    } else if ((f->job == JOB_BUTTON || f->job == JOB_PEDAL) && f->buttons && !f->shown && !paused(t) && press_lifts(t, f)) {
+    } else if (f->job == JOB_BUTTON && f->control == TC_CAMERA && f->buttons && !f->with_other && !paused(t) &&
+               touch_visible(t) && !flyover_on(t)) {
+        /* the camera's step (finding 277): SELECT stays PRESS_FIELDS past the lift and the game's
+           camera takes the next view while it is held (touch_take_camera_step, the core's
+           port_touch_camera_step); no Up is sent, the rider's Up is the air pitch's too */
+        f->lifted = 1, f->shown = 0;   /* shown again: PRESS_FIELDS from the next pad read (touch_update) */
+        press_lifts(t, f);
+        f->camera_step = 1;   /* asked when its SELECT goes out (touch_update), after the bail window too */
+        snprintf(t->note, sizeof t->note, "touch: camera: the next view (SELECT and the camera's step)%s", f->sent ? "" : ", after the bail window");
+        t->note_ready = 1;
+        return;
+    } else if (f->job == JOB_BUTTON && f->control == TC_CAMERA && f->with_other && !t->note_ready) {
+        snprintf(t->note, sizeof t->note, "touch: camera: SELECT with another button (no view change of its own)");
+        t->note_ready = 1;
+    }
+    if ((f->job == JOB_BUTTON || f->job == JOB_PEDAL) && f->buttons && !f->shown && !paused(t) && press_lifts(t, f)) {
         /* the game hasn't read this press yet (a tap between two reads, a stall, a held-back or
            waiting press): the finger stays, lifted, and its press goes as a short one; its release
            then comes in a field of its own, so ✕'s and SELECT's windows count what the game saw */
@@ -2826,6 +2872,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         trick_tick(t);
     }
     due_presses(t);
+    camera_chord(t);
     cross_track(t);
     tilt_step(t);
     hints_step(t);
@@ -2837,6 +2884,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
             if (!f->used || !f->sent || f->shown) continue;
             f->shown = 1;
             if (f->lifted) f->lift_until = game->vsync + press_vsyncs(t, PRESS_FIELDS);
+            if (f->camera_step) f->camera_step = 0, t->camera_step = 1;
         }
     for (int i = 0; i < 16; i++)
         if (t->pulse_buttons[i] && t->pulse_fields[i]) {
@@ -2877,6 +2925,7 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
 }
 
 int touch_take_buzz(Touch *t) { int b = t->buzz; t->buzz = 0; return b; }
+int touch_take_camera_step(Touch *t) { int c = t->camera_step; t->camera_step = 0; return c; }
 const char *touch_take_note(Touch *t)
 {
     if (!t->note_ready) return NULL;

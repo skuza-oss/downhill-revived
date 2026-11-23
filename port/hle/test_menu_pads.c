@@ -130,6 +130,33 @@ int main(void)
         assert(r[0].button == PAD_LEFT && r[1].button == PAD_RIGHT && menu_legend_hit(r, 4, 35) == PAD_LEFT &&
                menu_legend_hit(r, 4, 95) == PAD_RIGHT);
     }
+    /* the legend bar (finding 277): the main menu's "▲ PREV ▼ NEXT           ✕ SELECT  △ BACK" (retail
+       D_0028EFA8), PREV Up and NEXT Down, the wide gap before SELECT nobody's; the rider screen's with
+       □ INFO between NEXT and SELECT (D_0028EFD8) */
+    {
+        static const char bar[] = GLYPH_UP " PREV " GLYPH_DOWN " NEXT           " GLYPH_CROSS " SELECT  " GLYPH_TRIANGLE " BACK";
+        static const char rider[] = GLYPH_LEFT " PREV " GLYPH_RIGHT " NEXT   " GLYPH_SQUARE " INFO  " GLYPH_CROSS " SELECT  " GLYPH_TRIANGLE " BACK";
+        static const uint16_t want[4] = {PAD_UP, PAD_DOWN, PAD_CROSS, PAD_TRIANGLE};
+        static const uint16_t want_rider[5] = {PAD_LEFT, PAD_RIGHT, PAD_SQUARE, PAD_CROSS, PAD_TRIANGLE};
+        static const char *const words[5] = {"PREV", "NEXT", "INFO", "SELECT", "BACK"};
+        int length = (int)strlen(bar), prefix[MENU_PAGE_TEXT + 1];
+        for (int i = 0; i <= length; i++) prefix[i] = 10 * i;
+        MenuLegendRange r[MENU_LEGEND_BUTTONS];
+        assert(menu_legend_ranges(bar, length, prefix, r, MENU_LEGEND_BUTTONS) == 4);
+        for (int k = 0; k < 4; k++) {
+            int at = (int)(strstr(bar, words[k < 2 ? k : k + 1]) - bar);
+            assert(r[k].button == want[k] && menu_legend_hit(r, 4, 10 * at - 15) == want[k]);   /* its glyph */
+            for (int i = at; i < at + (int)strlen(words[k < 2 ? k : k + 1]); i++) assert(menu_legend_hit(r, 4, 10 * i + 5) == want[k]);
+        }
+        assert(menu_legend_hit(r, 4, (r[1].right + r[2].left) / 2) == 0);   /* the gap before SELECT */
+        length = (int)strlen(rider);
+        for (int i = 0; i <= length; i++) prefix[i] = 10 * i;
+        assert(menu_legend_ranges(rider, length, prefix, r, MENU_LEGEND_BUTTONS) == 5);
+        for (int k = 0; k < 5; k++) {
+            int at = (int)(strstr(rider, words[k]) - rider);
+            assert(r[k].button == want_rider[k] && menu_legend_hit(r, 5, 10 * at + 15) == want_rider[k]);
+        }
+    }
     assert(menu_legend_ranges("RETRY", 5, (const int[6]){0, 10, 20, 30, 40, 50}, NULL, 0) == 0);  /* no glyph: no buttons */
     printf("menu pads: a legend's buttons, each word its own, never overlapping\n");
     /* MUSIC PLAYLIST > CUSTOM's legend lines (finding 274): each line's words take its button, the

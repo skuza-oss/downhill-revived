@@ -1141,8 +1141,8 @@ static void list_drive(void *menu)
    - lists: moving over a row presses Up/Down until the cursor is on it (one press at a time,
      each once the last is done); a left click does the same, then Cross; the wheel is Up/Down;
    - the rider carousel: a click on the left part is Left (previous), on the right edge Right
-     (next), in the middle (the rider) Cross; the wheel is Left/Right; a click on the legend at the
-     bottom is the button it shows;
+     (next), in the middle (the rider) Cross; the wheel is Left/Right; its legend bar's words are
+     their buttons (bar_tap, finding 277), the rest of the bar's line nothing;
    - the title, the flight to the rider screen and the ride to the shop: a click is Cross;
    - a right click is Triangle on every screen. */
 
@@ -1151,6 +1151,7 @@ typedef struct { short align, style, x, y; char text[SHELL_TEXT]; } ShellText;
 static ShellText shell_texts[2][SHELL_TEXTS];
 static int shell_count[2], shell_fill;  /* shell_fill: the frame being drawn; the other is the last one */
 static unsigned fields, shell_seen;     /* fields: menu_mouse_field's count; shell_seen: at the last shell frame */
+static unsigned shell_frames;           /* port_shell_frame's count */
 static int shell_ran;                   /* a shell frame has run: the game's views exist (issue #11) */
 
 void port_shell_frame(void)
@@ -1160,12 +1161,87 @@ void port_shell_frame(void)
     shell_count[shell_fill] = 0;
     shell_seen = fields;
     shell_ran = 1;
+    shell_frames++;
 }
 
 /* The front end runs: a shell frame in the last 8 fields. Before the first one there are no views
    yet (func_0023D650 would read view 0's missing object): a mouse moved over the window as the
    game started crashed it there. */
 static int shell_running(void) { return shell_ran && fields - shell_seen < 8; }
+
+/* ---- the legend bar (finding 277, issue #120) ----
+   The front end's legend at the bottom ("▲ PREV ▼ NEXT ✕ SELECT △ BACK" on the main menu and the
+   shell's lists, the rider screen's with □ INFO, the shop's, the track chooser's, the game's
+   popups') is one function, func_001BAF10(obj, index): the index-th of five texts, left-aligned at
+   view 0's x 25, y 199 in one size (0-2) or y 204 in a smaller one (3-4). The patch reports each
+   draw (port_legend_bar); a tap on a word of the bar presses its button, as a pad's would, on
+   every screen that shows it. Only a bar of the picture on screen counts: drawn in the latest
+   shell frame (the VBLANK, and so menu_mouse_field, comes between the frame's draw and the next
+   frame's port_shell_frame), on the screen and under the popup that are up now. A screen that
+   changes and draws no bar (RIDER SELECTED after the rider's ✕) leaves none behind for a quick
+   tap. The words' ranges are finding 266's (menu_legend_ranges): each button from its glyph to
+   its word's end, never overlapping, nothing between words. */
+extern const char D_0028EFA8[], D_0028EFD8[], D_0028F008[], D_0028F038[], D_0028F058[];
+extern int32_t D_0029DED8;            /* the shell's screen */
+enum { BAR_X = 25, BAR_FIELDS = 8 };
+static int bar_index = -1, bar_screen;
+static unsigned bar_field, bar_frame;
+static void *bar_popup;
+
+static void *popup_now(void) { return menu_popup_up() ? *(void **)(D_003F52D0 + M_MENU) : NULL; }
+
+void port_legend_bar(int index)
+{
+    bar_index = index, bar_field = fields, bar_frame = shell_frames;
+    bar_screen = D_0029DED8, bar_popup = popup_now();
+}
+
+/* The bar of the picture on screen: its text, its line's y and its buttons' ranges in view 0's x;
+   0 when none is shown (none drawn in the latest shell frame, or by another screen or popup, or
+   the front end has stopped: no frame in BAR_FIELDS fields). */
+static int bar_ranges(MenuLegendRange *ranges, int *y, const char **shown)
+{
+    const char *const texts[5] = {D_0028EFA8, D_0028EFD8, D_0028F008, D_0028F038, D_0028F058};
+    if (bar_index < 0 || bar_index > 4 || bar_frame != shell_frames || fields - bar_field > BAR_FIELDS ||
+        bar_screen != D_0029DED8 || bar_popup != popup_now()) return 0;
+    const char *text = texts[bar_index];
+    int big = bar_index < 3, length = (int)strnlen(text, 0x30), prefix[0x31];
+    char saved[0x20], part[0x31];
+    memcpy(saved, D_004F3570, sizeof saved);
+    if (big) func_0020FB80(0, 349, 166, -128, -16);   /* func_001BAF10's sizes */
+    else func_0020FB80(0, 256, 160, -80, -32);
+    *(int *)(D_004F3570 + 0x1C) = 0;                    /* left-aligned (func_0020F9A8) */
+    for (int i = 0; i <= length; i++) {
+        memcpy(part, text, (size_t)i);
+        part[i] = 0;
+        prefix[i] = func_0020F860(0, part) >> 4;
+    }
+    memcpy(D_004F3570, saved, sizeof saved);
+    int n = menu_legend_ranges(text, length, prefix, ranges, MENU_LEGEND_BUTTONS);
+    for (int k = 0; k < n; k++) {
+        ranges[k].left += BAR_X, ranges[k].glyph_right += BAR_X, ranges[k].right += BAR_X;
+        ranges[k].from += BAR_X, ranges[k].to += BAR_X;
+    }
+    *y = big ? 199 : 204;
+    if (shown) *shown = text;
+    return n;
+}
+
+/* The bar's button under a tap, 0 none: on the bar's line (8 above its text's top to the picture's
+   bottom) and on one of its words. */
+static uint16_t bar_tap(int *at_x, int *at_y)
+{
+    MenuLegendRange ranges[MENU_LEGEND_BUTTONS];
+    int y = 0, n = bar_ranges(ranges, &y, NULL);
+    if (!n || !pointer(0, at_x, at_y) || *at_y < y - 8) return 0;
+    return menu_legend_hit(ranges, n, *at_x);
+}
+
+static const char *button_name(uint16_t b)
+{
+    return b == PAD_CROSS ? "Cross" : b == PAD_TRIANGLE ? "Triangle" : b == PAD_SQUARE ? "Square" : b == PAD_CIRCLE ? "Circle"
+         : b == PAD_UP ? "Up" : b == PAD_DOWN ? "Down" : b == PAD_LEFT ? "Left" : b == PAD_RIGHT ? "Right" : "a button";
+}
 
 void port_shell_text(int align, int style, int x, int y, const void *text)
 {
@@ -1208,7 +1284,7 @@ static const ShellList shell_lists[] = {
 };
 enum { SHELL_TITLE = 0, SHELL_FLIGHT = 32, SHELL_SELECTED = 33, SHELL_TO_SHOP = 34 };
 static int carousel(int screen) { return screen >= 3 && screen <= 6; }  /* rider select (func_001F24B8) */
-extern int32_t D_0029DED8;            /* the shell's screen */
+extern int32_t D_0029DF68, D_0029DEF0, D_004C6910[];  /* the rider screen's player, its INFO page; each player's rider */
 extern char D_004C6560[];             /* the shell's text styles: 0x58 bytes each, +0x48 glyph sizes */
 
 static ShellMenu *shell_menu(const ShellList *l) { return (ShellMenu *)(uintptr_t)(0x08000000u + l->menu); }
@@ -1271,17 +1347,6 @@ static const ShellList *shell_list(int screen)
     return NULL;
 }
 
-/* The rider screen's legend (func_001BAF10's bar, "< PREV > NEXT  [] INFO  X SELECT  /\ BACK"):
-   its buttons across the 640-wide view. */
-static uint16_t legend_button(int mx)
-{
-    static const struct { short left, right; uint16_t button; } legend[] = {
-        {20, 118, PAD_LEFT}, {118, 220, PAD_RIGHT}, {240, 340, PAD_SQUARE}, {350, 480, PAD_CROSS}, {490, 600, PAD_TRIANGLE}};
-    for (unsigned i = 0; i < sizeof legend / sizeof *legend; i++)
-        if (mx >= legend[i].left && mx < legend[i].right) return legend[i].button;
-    return 0;
-}
-
 static void shell_mouse(int news, int moved, int left, int right, int wheel)
 {
     int screen = D_0029DED8;
@@ -1300,8 +1365,8 @@ static void shell_mouse(int news, int moved, int left, int right, int wheel)
         if (shell_trace > 0) hle_log("shell mouse: screen %d at %d,%d row %d cursor %d%s\n", screen, mx, my, row,
                                      shell_menu(list)->cursor, left ? " click" : "");
     } else if (on && left && carousel(screen) && w > 0 && h > 0) {
-        uint16_t b = my >= h * 86 / 100 ? legend_button(mx * 640 / w)
-                   : mx < w * 35 / 100 ? PAD_LEFT : mx >= w * 85 / 100 ? PAD_RIGHT : PAD_CROSS;
+        /* its legend bar's words were taken first (bar_tap); the bar's line beside them does nothing */
+        uint16_t b = my >= h * 86 / 100 ? 0 : mx < w * 35 / 100 ? PAD_LEFT : mx >= w * 85 / 100 ? PAD_RIGHT : PAD_CROSS;
         if (b) press(b);
         if (shell_trace > 0) hle_log("shell mouse: rider screen click at %d,%d: %04x\n", mx, my, b);
     } else if (on && left && (screen == SHELL_TITLE || screen == SHELL_FLIGHT || screen == SHELL_SELECTED || screen == SHELL_TO_SHOP))
@@ -1390,6 +1455,40 @@ static void trace_screens(void)
         } else
             hle_log("mouse trace: popup closed\n");
     }
+    /* the legend bar when another one shows: its buttons' taps in view 0 and as window fractions (a
+       check aims there; the inverse of pointer()) */
+    static int last_bar = -1;
+    MenuLegendRange bar[MENU_LEGEND_BUTTONS];
+    const char *bar_text = NULL;
+    int bar_y = 0, bar_n = bar_ranges(bar, &bar_y, &bar_text), shown = bar_n ? bar_index : -1;
+    if (shown != last_bar) {
+        last_bar = shown;
+        int w = 0, h = 0;
+        if (shown >= 0) func_0023D650(0, &w, &h);
+        float fov = port_fov_x > 0 ? port_fov_x : 1.0f;
+        if (shown >= 0 && w > 0 && h > 0) {
+            hle_log("mouse trace: legend bar %d at %d,%d (view %dx%d, row %.4f): %s\n", shown, BAR_X, bar_y, w, h,
+                    (bar_y + 5) / (float)h, bar_text);
+            for (int k = 0; k < bar_n; k++)
+                hle_log("  bar button %04x: taps %d-%d, window %.4f-%.4f\n", bar[k].button, bar[k].from, bar[k].to,
+                        (w * 0.5f + (bar[k].from - w * 0.5f) * fov) / w, (w * 0.5f + (bar[k].to - w * 0.5f) * fov) / w);
+        } else if (shown < 0)
+            hle_log("mouse trace: legend bar gone\n");
+    }
+    /* what a press changed on a shell screen: a list's cursor, the rider screen's rider and its INFO
+       page (D_0029DEF0) */
+    static int last_state = -1;
+    int state = -1;
+    if (shell_running()) {
+        const ShellList *l = shell_list(D_0029DED8);
+        if (l) state = shell_menu(l)->cursor & 0xFF;
+        else if (carousel(D_0029DED8)) state = 0x100 + (D_004C6910[D_0029DF68] & 0xFF) * 2 + (D_0029DEF0 != 0);
+    }
+    if (state != last_state && state >= 0) {
+        if (state < 0x100) hle_log("mouse trace: screen %d cursor %d\n", D_0029DED8, state);
+        else hle_log("mouse trace: screen %d rider %d info %d\n", D_0029DED8, (state - 0x100) / 2, state & 1);
+    }
+    last_state = state;
     if (shell_running() && D_0029DED8 != last_screen && shell_count[shell_fill ^ 1]) {
         last_screen = D_0029DED8;
         hle_log("mouse trace: screen %d\n", last_screen);
@@ -1426,6 +1525,16 @@ void menu_mouse_field(void)
     int news = moved || left || right || wheel;
     if (!news && shell_target < 0 && list_target < 0) return;  /* nothing from the mouse: nothing at all */
     if (D_0029E290) { queued = 0, shell_target = list_target = -1; return; }  /* riding: the mouse does nothing */
+    if (left) {  /* a word of the legend bar: its button, on whatever screen shows it (finding 277) */
+        int bx = -1, by = -1;
+        uint16_t b = bar_tap(&bx, &by);
+        if (b) {
+            hle_log("menu mouse: click at %d,%d: the legend bar's %s\n", bx, by, button_name(b));
+            press(b);
+            shell_target = list_target = -1;
+            return;
+        }
+    }
     void *menu = *(void **)(D_003F52D0 + M_MENU);
     if (menu && !D_003F52D0[M_CLOSING]) {  /* a popup runs (the shell waits for it); the manager keeps
                                               its last page after a run, closing set */

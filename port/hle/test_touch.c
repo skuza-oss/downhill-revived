@@ -199,6 +199,89 @@ static void stall(double ms)
     game.race_ms += ms;
 }
 
+/* The camera (finding 277, issue #121): SELECT alone changes no view; the game's camera is SELECT held +
+   d-pad Up. A camera press alone holds SELECT PRESS_FIELDS past its lift (one SELECT: no bail) and
+   asks the game's camera for the next view (touch_take_camera_step) in the field that SELECT goes
+   out, after the bail window too; it never sends Up, which the race also reads as the air pitch
+   (func_0012DFD0: a step in a jump would tilt the bike). A press combined with another (L2's look
+   back, PEDAL), even a down and an up drained in one batch, asks for none. */
+typedef struct { int selects, select_gap, ups, steps, step_at, step_with_select, edge_at, held_after; } CameraRun;
+static CameraRun camera_fields(int n, int lift_at, long long id, float x, float y)
+{
+    CameraRun r = {0, 0, 0, 0, -1, 0, -1, 0};
+    int was = 0;
+    for (int i = 0; i < n; i++) {
+        if (i == lift_at) touch_up(t, id, x, y, now);
+        field();
+        uint16_t b = buttons();
+        int sel = (b & PAD_SELECT) != 0;
+        if (sel && !was) { r.selects++; if (r.edge_at < 0) r.edge_at = i; }
+        if (!sel && was && i < lift_at) r.select_gap = 1;
+        if (sel && lift_at >= 0 && i > lift_at) r.held_after++;
+        if (b & PAD_UP) r.ups++;
+        if (touch_take_camera_step(t)) { r.steps++; r.step_at = i; r.step_with_select = sel; }
+        was = sel;
+    }
+    return r;
+}
+
+static void test_camera_step(void)
+{
+    float x, y, ox, oy;
+    for (int classic = 0; classic < 2; classic++) {
+        start(classic ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        fields(40);
+        touch_take_camera_step(t);
+        at(TC_CAMERA, &x, &y);
+        /* a held tap: one SELECT, held past the lift, the step in the lift's field, never Up */
+        touch_down(t, 1, x, y, now);
+        CameraRun r = camera_fields(40, 6, 1, x, y);
+        CHECK(r.selects == 1 && !r.select_gap && !r.ups && r.steps == 1 && r.step_at == 6 && r.step_with_select && r.held_after >= 2);
+        CHECK(!(buttons() & (PAD_SELECT | PAD_UP)));
+        /* a tap the game never read (down and up before the next pad read): the step with its SELECT */
+        fields(40);
+        touch_down(t, 2, x, y, now);
+        touch_up(t, 2, x, y, now + 5);
+        r = camera_fields(10, -1, 0, 0, 0);
+        CHECK(r.selects == 1 && !r.ups && r.steps == 1 && r.step_at == r.edge_at && r.step_with_select);
+        /* a second tap inside the bail window waits for it: its step goes with its SELECT, later */
+        fields(10);
+        touch_down(t, 3, x, y, now);
+        touch_up(t, 3, x, y, now + 5);
+        r = camera_fields(60, -1, 0, 0, 0);
+        CHECK(r.selects == 1 && !r.ups && r.steps == 1 && r.step_at == r.edge_at && r.edge_at > 5 && r.step_with_select);
+        /* combined with another press: SELECT alone, no step (look back is SELECT + L2) */
+        fields(40);
+        int other = classic ? TC_LBAR : TC_PEDAL;
+        at(other, &ox, &oy);
+        touch_down(t, 4, x, y, now);
+        fields(3);
+        touch_down(t, 5, ox, oy, now);
+        fields(4);
+        touch_up(t, 5, ox, oy, now);
+        fields(3);
+        r = camera_fields(20, 0, 4, x, y);
+        CHECK(!r.ups && !r.steps && !(buttons() & PAD_SELECT));
+        /* the other held, the camera's down and up drained in one batch (no update between): no step */
+        fields(40);
+        touch_down(t, 6, ox, oy, now);
+        fields(3);
+        touch_down(t, 7, x, y, now);
+        touch_up(t, 7, x, y, now + 5);
+        r = camera_fields(20, -1, 0, 0, 0);
+        CHECK(r.selects == 1 && !r.ups && !r.steps);
+        touch_up(t, 6, ox, oy, now);
+        /* all four in one batch (camera down, other down, other up, camera up): no step */
+        fields(40);
+        touch_down(t, 8, x, y, now);
+        touch_down(t, 9, ox, oy, now + 2);
+        touch_up(t, 9, ox, oy, now + 4);
+        touch_up(t, 8, x, y, now + 6);
+        r = camera_fields(20, -1, 0, 0, 0);
+        CHECK(!r.ups && !r.steps);
+    }
+}
+
 /* Taps the game never read before their lift (down and up drained before the next pad read: a
    quick tap, a stall) still reach the game: PEDAL, Classic's ✕, the camera's SELECT (Sol's round-2
    #2), and a double tap stays two presses with a release between them. */
@@ -3030,6 +3113,7 @@ int main(void)
     test_flick();
     test_quick_tap();
     test_unread_taps();
+    test_camera_step();
     test_air_wait_tap();
     test_sprint_guards();
     test_pause();

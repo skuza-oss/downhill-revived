@@ -300,7 +300,13 @@ PATCHES = {
     # build declares each name at its address instead (.sdata from 0x29D4A0, in order)
     'unsorted/001BA3B8.c': [('text', '#include "include_asm.h"\n', '#include "include_asm.h"\n' + STR8_DECLS),
                             ('text', '    int name = WORD4(a, b, c, d); int name##_hi = WORD4(e, f, g, h)',
-                             '    /* in the PS2 data image */')],
+                             '    /* in the PS2 data image */'),
+                            # the front end's legend bar ("▲ PREV ▼ NEXT ✕ SELECT △ BACK", the rider
+                            # screen's, the shop's, ...): which one this frame drew, so a tap on its words
+                            # presses their buttons (port/hle/menu_page.c, finding 277; host memory only)
+                            ('text', 'void func_001BAF10(void *obj, int index) {\n',
+                             'extern void port_legend_bar(int index);\n'
+                             'void func_001BAF10(void *obj, int index) {\n port_legend_bar(index);\n')],
     # func_00221888 loads and stores all four lanes of offset, whose w the C never sets: host
     # stack bytes reached the rider (obj->xDB0.w, rider +0x535C) and differed between PCs. The
     # game never reads that lane back (DHD_WATCH, finding 041); zero it so every byte is defined.
@@ -400,7 +406,16 @@ PATCHES = {
     # vf12 is step, the local at sp+0 (retail passes $sp as &step to func_00149EC0).
     'unsorted/00148F60.cpp': [('text', '"lqc2 $vf12, 0x0($sp)\\n\\t"', '"lqc2 $vf12, 0x0(%3)\\n\\t"'),
                               ('text', ': "=m"(obj->x80) : "r"(&obj->x80), "f"(GetScale(obj)) : "$2");',
-                               ': "=m"(obj->x80) : "r"(&obj->x80), "f"(GetScale(obj)), "r"(&step) : "$2");')],
+                               ': "=m"(obj->x80) : "r"(&obj->x80), "f"(GetScale(obj)), "r"(&step) : "$2");'),
+                              # The touch camera button's step (finding 277): the camera's own read of
+                              # the rider's Up (SELECT held + Up: the next view) also takes a step the
+                              # touch overlay asked for, view 0's camera only, once. The rider's Up
+                              # itself (the air pitch reads it too, func_0012DFD0) is never set.
+                              ('text', 'extern int func_002205A0(int),func_00220AE0(int,int),func_00238F60(void);\nvoid func_0014CC38(',
+                               'extern int func_002205A0(int),func_00220AE0(int,int),func_00238F60(void);\n'
+                               'extern "C" int port_touch_camera_step(void *camera);\nvoid func_0014CC38('),
+                              ('text', '            value = r->x13D9 ? r->x1260 : r->x1198;\n',
+                               '            value = (r->x13D9 ? r->x1260 : r->x1198) || port_touch_camera_step(s);\n')],
     # The EE's va_start (gcc 2.95 MIPS builtins); on i386 va_list is a char * too.
     'unsorted/00234FB0.c': [('text', VA_START_EE, VA_START)],
     'unsorted/002350E8.c': [('text', VA_START_EE, VA_START)],

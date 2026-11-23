@@ -136,7 +136,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   screen the button names (icons, SETTINGS' Tabs line) are a controller's only once it has sent
   input since the last touch (`touch_host_pad_prompts`). iOS has no system Back: a swipe in from
   the left edge outside a race is Android's Back, and our pages' own legends (Back, Undo, Keep,
-  Clear) answer a tap on every platform (finding 227).
+  Clear) answer a tap on every platform (finding 227). The game's legend bar at the bottom of the
+  menus (`func_001BAF10`: PREV, NEXT, INFO, SELECT, BACK) takes a tap on each word as its button on
+  every screen that draws it, a mouse click too; the touch camera button is the game's camera
+  (SELECT, and on its lift the next view, a step only the game's camera takes, never the rider's Up,
+  the air pitch's input; SELECT alone with another button; only the bar of the picture on screen
+  counts; finding 277).
 - The disc image's own check is one for every platform (`port/host/disc_check.c`, from host.c's
   `disc_problem`: ISO 9660, SYSTEM.CNF booting SCUS_971.77, the whole declared volume), then the
   game's data check in the core. Desktop launcher uses a Rust file-reader FFI adapter; Android's

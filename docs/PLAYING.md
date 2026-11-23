@@ -77,6 +77,12 @@ What works today:
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
   or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: every kind of race, as on the PC
   (Quick Race, public, private and P2P races). The game's
+  The words of the legend at the bottom of the menus (PREV, NEXT, INFO, SELECT, BACK) are buttons:
+  tap one and it does what that pad button does there (a mouse click does the same on the PC). The
+  **camera** button (SELECT in Classic pad) changes the view with each tap: default, close, first
+  person, far, and round again, as SELECT + up on a pad (but it never tilts the bike in a jump); held together with another button it is
+  SELECT for that button (with L2: look back). Two quick taps never bail you out (SELECT twice): the
+  second waits half a second. The game's
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
   buttons); **ENTER** goes back to the race and enters them. The rest of the game's own pause menu
   (OPTIONS, TRICK LIST, NEW LEVEL, MUSIC PLAYLIST, as the mode offers them) is behind the panel's
