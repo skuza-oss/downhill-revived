@@ -303,6 +303,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 275 | [picture settings: Brightness, Contrast, Saturation, Gamma (issue #115)](275-picture-settings.md) | current |  |
 | 276 | [the bike shop's spotlight on the native renderer](276-bike-shop-light.md) | current |  |
 | 278 | [a PowerVR B-Series phone loses the GPU device in the menus](278-powervr-bxm-device-lost.md) | current |  |
+| 280 | [input latency (issue #123): where a press waits, and what of it is ours](280-input-latency.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

@@ -93,6 +93,7 @@ static void native_present(Native *n)
     inside = perf_log_on() ? host_wall_seconds() : 0;
     counter_present(p->surface, 1);
     if (inside) perf_present_wait(host_wall_seconds() - inside);  /* the present call itself */
+    input_latency_presented();  /* DHD_INPUT_LATENCY (host.c, finding 280) */
     native_rstat_add(RSTAT_SHOW, rs);
     native_note_presented(n);
     if (spikes) {

@@ -1044,6 +1044,10 @@ static void keyboard_merge(HostPad *out)
                 out->buttons |= arrows[i].bit, out->pressure[arrows[i].pressure] = 255;
 }
 
+static int latency_on(void);
+static void latency_take(const HostPad *in);
+static void latency_present(double began, double ready);
+
 /* Player `port`'s controller (SDL, gamepad.c) through the player's layout, and for player 1 the
    keyboard as well, merged. */
 void host_pad_device(int port, HostPad *out)
@@ -1071,6 +1075,7 @@ void host_pad_device(int port, HostPad *out)
         touch_host_merge(out);  /* the touch controls (touch_host.c, finding 141) */
     }
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */
+    if (port == 0 && latency_on()) latency_take(out);  /* DHD_INPUT_LATENCY (finding 280) */
 }
 
 /* The startup movies (func_001EBFD8: the logos, then the attract movie) play unless dhd.ini's
@@ -1768,6 +1773,7 @@ void pacing_present(double due, double began)
         __atomic_thread_fence(__ATOMIC_RELEASE);
         shown_due = due;
     }
+    if (latency_on()) latency_present(began, now);
     FILE *log = pacing_file(1);
     if (log) {
         /* where in the display's refresh this picture went, from DWM's newest vblank (-1 unknown) */
@@ -1794,8 +1800,129 @@ void pacing_present(double due, double began)
     }
 }
 
+/* DHD_INPUT_LATENCY=1 (finding 280): where a press of player 1 (controller or keyboard) waits on its
+   way to the screen. One sample at a time, at most one every 0.3 s, 400 lines a run:
+     input latency: field F (+N to its picture): host to the game's read A ms | read to the picture
+     handed on B | to the presenter C | held to its due D | present E | read to presented T ms |
+     then the display's next refresh in R ms (DWM, Windows)
+   "host" is when SDL took the key or button from the system (the event's time stamp); the game's
+   read is the field's last pad read before the EE runs its frame (pad_refresh after the
+   just-in-time wait, else pad_vsync); the picture is the first one handed on after that read (the
+   first the game could draw from it). What the game itself takes before a press shows (its own
+   frames between reading a press and drawing what it did) is not in the line. Host side only. */
+extern uint64_t kernel_vsync_count;
+static int latency = -1;
+static volatile double latency_seen_at;     /* SDL's thread: the newest press, until a read takes it */
+static struct {
+    double seen, take, handed, began, ready, call;
+    uint64_t field, picture;
+    int lines;
+} lat;
+static atomic_int lat_state;  /* 0 none, 1 read (EE), 2 handed on (EE), 3 at the presenter (render thread) */
+
+static int latency_on(void)
+{
+    if (latency < 0) latency = getenv("DHD_INPUT_LATENCY") && atoi(getenv("DHD_INPUT_LATENCY")) != 0;
+    return latency;
+}
+
+void input_latency_seen(double at)
+{
+    if (latency_on()) __atomic_store(&latency_seen_at, &at, __ATOMIC_RELEASE);
+}
+
+/* The game thread's read of player 1 (host_pad_device): a button down that wasn't, a sample. */
+static void latency_take(const HostPad *in)
+{
+    static uint16_t before;
+    uint16_t pressed = in->buttons & (uint16_t)~before;
+    before = in->buttons;
+    double now = host_wall_seconds(), seen, none = 0;
+    __atomic_exchange(&latency_seen_at, &none, &seen, __ATOMIC_ACQ_REL);
+    int state = atomic_load(&lat_state);
+    if (state && now - lat.take > 1) atomic_store(&lat_state, state = 0);  /* never presented (minimised) */
+    if (!pressed || state || now - lat.take < 0.3 || lat.lines >= 400) return;
+    lat.seen = seen > 0 && seen <= now && now - seen < 0.5 ? seen : now;
+    lat.take = now;
+    lat.field = kernel_vsync_count;
+    atomic_store(&lat_state, 1);
+}
+
+/* EE thread, the VBLANK: the first picture handed on after the read is the one to follow. */
+static void latency_handoff(void)
+{
+    if (atomic_load(&lat_state) != 1) return;
+    lat.handed = host_wall_seconds();
+    lat.began = handed_began;
+    lat.picture = kernel_vsync_count + 1;  /* the field this VBLANK starts (vsync counts after the handoff) */
+    atomic_store(&lat_state, 2);
+}
+
+/* The presenter: in pacing_present, before (ready) and after (call) the hold to the due time. */
+static void latency_present(double began, double ready)
+{
+    if (atomic_load(&lat_state) != 2 || began != lat.began) return;
+    lat.ready = ready;
+    lat.call = host_wall_seconds();
+    atomic_store(&lat_state, 3);
+}
+
+/* The display's next refresh after `at`, from DWM's newest vblank and period (0: unknown). */
+static double latency_refresh_after(double at, double *period)
+{
+    *period = 0;
+#if defined(_WIN64)
+    static HRESULT (WINAPI *timing)(HWND, DWM_TIMING_INFO *);
+    static int loaded;
+    if (!loaded) {
+        loaded = 1;
+        HMODULE dwm = LoadLibraryA("dwmapi.dll");
+        timing = dwm ? (HRESULT (WINAPI *)(HWND, DWM_TIMING_INFO *))(void *)GetProcAddress(dwm, "DwmGetCompositionTimingInfo")
+                     : NULL;
+    }
+    DWM_TIMING_INFO info;
+    LARGE_INTEGER freq, qpc;
+    memset(&info, 0, sizeof info);
+    info.cbSize = sizeof info;
+    if (!timing || FAILED(timing(NULL, &info)) || !QueryPerformanceFrequency(&freq) || !info.qpcVBlank ||
+        !info.qpcRefreshPeriod)
+        return 0;
+    QueryPerformanceCounter(&qpc);
+    double now = host_wall_seconds(), refresh = (double)info.qpcRefreshPeriod / (double)freq.QuadPart,
+           vblank = now - (double)((LONGLONG)qpc.QuadPart - (LONGLONG)info.qpcVBlank) / (double)freq.QuadPart;
+    if (!(refresh > 0.001 && refresh < 0.1)) return 0;
+    *period = refresh;
+    return vblank + ceil((at - vblank) / refresh) * refresh;
+#else
+    (void)at;
+    return 0;
+#endif
+}
+
+void input_latency_presented(void)
+{
+    if (!latency_on() || atomic_load(&lat_state) != 3) return;
+    double done = host_wall_seconds(), period, refresh = latency_refresh_after(done, &period);
+    char display[96] = "";
+    if (refresh > 0)
+        snprintf(display, sizeof display, " | then the display's next refresh in %.1f ms (DWM, %.2f Hz)", (refresh - done) * 1e3,
+                 1 / period);
+    hle_log("input latency: field %llu (+%llu to its picture): host to the game's read %.1f ms | read to the picture handed on "
+            "%.1f | to the presenter %.1f | held to its due %.1f | present %.1f | read to presented %.1f ms%s\n",
+            (unsigned long long)lat.field, (unsigned long long)(lat.picture - lat.field), (lat.take - lat.seen) * 1e3,
+            (lat.handed - lat.take) * 1e3, (lat.ready - lat.handed) * 1e3, (lat.call - lat.ready) * 1e3,
+            (done - lat.call) * 1e3, (done - lat.take) * 1e3, display);
+    lat.lines++;
+    atomic_store(&lat_state, 0);
+}
+
 void host_pacing_config(double period, uint64_t field) { pacing_period=display_period(period); pacing_field=field; }
-void host_pacing_handoff(int fresh) { handed_due=fresh ? jit_due : 0; handed_began=frame_began; }
+void host_pacing_handoff(int fresh)
+{
+    handed_due = fresh ? jit_due : 0;
+    handed_began = frame_began;
+    if (latency_on()) latency_handoff();
+}
 void host_pacing_input(void) { frame_began=host_wall_seconds(); }
 
 /* Native diagnostics consume published scalar state, never call the module

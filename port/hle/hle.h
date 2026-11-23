@@ -79,6 +79,10 @@ double host_seconds(void);    /* the game clock in seconds: virtual under DHD_FR
    once) and when its pad was read; the presenter calls pacing_present just before it presents. */
 void pacing_handed(double *due, double *began);
 void pacing_present(double due, double began);
+/* DHD_INPUT_LATENCY=1 (host.c, finding 280): one dhd.log line per sampled press of player 1, the
+   time it spent in each stage from the host to the presented picture. */
+void input_latency_seen(double at);  /* SDL's thread: a key or button went down at `at` (host_wall_seconds) */
+void input_latency_presented(void);  /* the presenter: the picture pacing_present held is presented */
 enum { PAD_SELECT = 0x0001, PAD_L3 = 0x0002, PAD_R3 = 0x0004, PAD_START = 0x0008, PAD_UP = 0x0010,
        PAD_RIGHT = 0x0020, PAD_DOWN = 0x0040, PAD_LEFT = 0x0080, PAD_L2 = 0x0100, PAD_R2 = 0x0200,
        PAD_L1 = 0x0400, PAD_R1 = 0x0800, PAD_TRIANGLE = 0x1000, PAD_CIRCLE = 0x2000, PAD_CROSS = 0x4000,

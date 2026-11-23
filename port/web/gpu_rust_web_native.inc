@@ -42,6 +42,7 @@ volatile int gs_native_view;
 /* Pacing is worker.js's: every field is drawn at its vsync and shown at once. */
 void pacing_handed(double *due, double *began) { *due = 0; *began = 0; }
 void pacing_present(double due, double began) { (void)due; (void)began; }
+void input_latency_presented(void) {}
 
 /* No texture packs in the browser. */
 typedef struct TexPackEntry TexPackEntry;

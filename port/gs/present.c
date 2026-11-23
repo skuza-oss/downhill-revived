@@ -1159,6 +1159,7 @@ void gs_vsync(void)
             fprintf(stderr, "gs: WebGPU presentation failed\n");
             disabled = 1;
         }
+        input_latency_presented();  /* DHD_INPUT_LATENCY (port/hle/host.c, finding 280) */
     }
     capture(width, height, gpu_frame);
     gs_capture_vsync(&gs);

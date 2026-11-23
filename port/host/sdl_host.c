@@ -123,6 +123,12 @@ static void text_event(const SDL_TextInputEvent *t)
 static void dispatch(const SDL_Event *e)
 {
     if (touch_host_event(e)) return;  /* the touch controls' (touch_host.c): Back, a touch's mouse in a race */
+    if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+        e->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
+        /* DHD_INPUT_LATENCY (port/hle/host.c, finding 280): when SDL took the press from the system */
+        Uint64 now = SDL_GetTicksNS(), at = e->common.timestamp;
+        input_latency_seen(host_wall_seconds() - (at && at <= now ? (double)(now - at) / 1e9 : 0));
+    }
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:

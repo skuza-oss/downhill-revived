@@ -2432,6 +2432,7 @@ static void native_wanted(const NativeSurface *s, unsigned want[2])
 
 void pacing_handed(double *due, double *began);   /* port/hle/kernel.c, just-in-time frames */
 void pacing_present(double due, double began);
+void input_latency_presented(void);   /* port/hle/host.c, DHD_INPUT_LATENCY (finding 280) */
 
 /* Full-screen 2D cards keep their 4:3 shape after eight consecutive flat
    fields. The EE supplies a state-specific limit with each queued field: the
