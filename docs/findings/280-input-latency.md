@@ -26,6 +26,9 @@ build's. No gameplay or feel change, no change to the online rules.
 - [x] 2026-11-23: before/after on the hidden desktop at 60 V-Sync on, 120 V-Sync on, 60 V-Sync off
 - [x] 2026-11-23: the game's own delay, from state traces (Result)
 - [x] 2026-11-23: boot and race state traces equal the base build's; checks (Checks)
+- [x] 2026-11-23 review: the handoff time travels with the picture (ddaa53fd), a hold ends at
+  its target (f305a5d3), only holds a waiting picture sat through count (f5fd16bf, with a
+  fake-clock test in `test_fps.c`), the diagnostic's threads and samples (f90ec907)
 - [ ] a player with a pad on a real display (unproven, below)
 
 ## The path from a button to the picture
@@ -65,8 +68,12 @@ player 1 (at most one per 0.3 s, 400 a session):
     read to presented T ms | then the display's next refresh in R ms (DWM, H Hz)
 
 "host" is when SDL's thread handed the press on; "the game's read" is the field's last read
-(after the just-in-time wait). With it off the cost is one cached flag test per pad read and per
-present.
+(after the just-in-time wait), the state the game's frame gets. A line is written only when one
+new button and exactly one SDL key or button event since the field before explain each other (not
+L1, R1, L2, R2: a trigger presses them without an event). The setting is read once on the main
+thread before the game's and SDL's threads start (`input_latency_init`); the presenter claims a
+sample with a compare-and-swap, and the game thread's one-second timeout takes back only an
+unclaimed one. With it off the cost is one flag test per pad read and per present.
 
 ## Decisions
 
@@ -74,6 +81,16 @@ present.
   margin and the slow stretch for phones (a09e2829) stay as they are; only time a picture spent
   waiting behind pictures the presenter was holding no longer counts as work. A phone that is
   really slow holds no picture, so its samples are what they were.
+- **A hold counts only while a picture waits for the render thread** (`pace_holds.h`, review): the
+  GS worker stamps a picture when it has drawn it and starts handing it to the render thread
+  (`NativeFrame.waiting_at`), the render thread reports the wait when it takes the picture
+  (`pacing_waited`), and only holds inside such waits leave a picture's sample. A hold while the
+  GS worker is still drawing the next picture costs that picture nothing, so a 22 ms frame drawn
+  beside an 11 ms hold reads 22 ms, not 11. In the queue this lane found a picture always waits
+  through every hold, so the queue still drains (measured again, below). A hold ends at the time
+  it was meant to end, so a late wake of the presenter's thread stays work. The handoff time
+  travels with the picture beside due and began (no shared ring). The exact renderer's path does
+  not report waits, so its samples are the base build's.
 - **Online pacing is left alone.** Online races take `pace()` before the VBLANK (no just-in-time
   frames, finding 139), so a press there waits about a period more from the read to the picture.
   Changing that is an online pacing change; the rules for it stand (follow-ups).
@@ -129,6 +146,10 @@ So from a press to the game's reaction on the display, on this PC: about 104 ms 
 The pacing's own summary line agrees: "pad to present mean" 63 to 82 ms before, 9 to 13 ms
 after, over the whole session.
 
+After the review's fixes (f90ec907, the same run): read to presented 8.3 / 8.8 ms, to the
+presenter 4.3 / 1.7, held 2.7 / 3.6, host to presented 13.3 / 16.7 ms; "pad to present mean" 9 to
+13 ms. The queue still drains.
+
 ### 120 fps V-Sync on and 60 fps V-Sync off
 
 | Setting | read to presented, before (menus / race) | after | host to presented, before | after |
@@ -158,13 +179,14 @@ there and it is not ours to patch.
 
 ### What changed
 
-- `port/hle/host.c` (3c43e100): `pacing_present`'s work samples leave out the presenter's holds
-  between the picture's handoff (`handed_note` at the VBLANK, `handed_at`) and its arrival
-  (`hold_note`, `held_since`). Saves 4 fields (about 66 ms) at 60 V-Sync on, about 28 ms at 120,
+- `port/hle/host.c`, `port/hle/pace_holds.h`, `port/gs/native_core.inc`, `port/gs/present.c`
+  (3c43e100, review ddaa53fd, f305a5d3, f5fd16bf): `pacing_present`'s work samples leave out the
+  presenter's holds a waiting picture sat through, between the picture's handoff (carried with
+  it) and its arrival. Saves 4 fields (about 66 ms) at 60 V-Sync on, about 28 ms at 120,
   about 25 ms at 60 V-Sync off, whenever a session had fallen into the slow stretch with a queue
   (on this PC: every session).
 - `port/hle/host.c`, `port/hle/hle.h`, `port/host/sdl_host.c`, `port/gs/*`, the tests' stubs
-  (8211a83c, bd630fe9, 3ab24574, 1add312f): the `DHD_INPUT_LATENCY=1` diagnostic, off by default.
+  (8211a83c, bd630fe9, 3ab24574, 1add312f, f90ec907): the `DHD_INPUT_LATENCY=1` diagnostic, off by default.
 
 Per platform (the pacing is `port/hle/host.c`, shared):
 - **Windows**: as measured.
@@ -211,9 +233,10 @@ Per platform (the pacing is `port/hle/host.c`, shared):
 
 ## Checks
 
-- Boot and race state traces (`state_trace_run.py`, `state_diff.py`) of 1add312f against the base
-  build d170cb59: boot 600 of 600 rows equal, race 5000 of 5000 rows equal, PASS (3ab24574 too).
-- `DHD_BUILD_SLOTS=4 python tools/check.py port -j 6` on 1add312f: OK. Its first run, on
-  3ab24574, failed `test_runtime`: the gamepad test links `sdl_host.c` without `host.c` and
-  had no `input_latency_seen`; fixed in 1add312f.
+- Boot and race state traces (`state_trace_run.py`, `state_diff.py`) of f90ec907 (after the
+  review) against the base build d170cb59: boot 600 of 600 rows equal, race 5000 of 5000 rows
+  equal, PASS (1add312f and 3ab24574 too).
+- `DHD_BUILD_SLOTS=4 python tools/check.py port -j 6` on f90ec907: OK (`test_runtime` runs
+  `test_fps.c`'s hold checks). Its first run, on 3ab24574, failed `test_runtime`: the gamepad
+  test links `sdl_host.c` without `host.c` and had no `input_latency_seen`; fixed in 1add312f.
 - `python tools/check.py docs`: OK.
