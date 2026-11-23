@@ -406,7 +406,16 @@ PATCHES = {
     # vf12 is step, the local at sp+0 (retail passes $sp as &step to func_00149EC0).
     'unsorted/00148F60.cpp': [('text', '"lqc2 $vf12, 0x0($sp)\\n\\t"', '"lqc2 $vf12, 0x0(%3)\\n\\t"'),
                               ('text', ': "=m"(obj->x80) : "r"(&obj->x80), "f"(GetScale(obj)) : "$2");',
-                               ': "=m"(obj->x80) : "r"(&obj->x80), "f"(GetScale(obj)), "r"(&step) : "$2");')],
+                               ': "=m"(obj->x80) : "r"(&obj->x80), "f"(GetScale(obj)), "r"(&step) : "$2");'),
+                              # The touch camera button's step (finding 277): the camera's own read of
+                              # the rider's Up (SELECT held + Up: the next view) also takes a step the
+                              # touch overlay asked for, view 0's camera only, once. The rider's Up
+                              # itself (the air pitch reads it too, func_0012DFD0) is never set.
+                              ('text', 'extern int func_002205A0(int),func_00220AE0(int,int),func_00238F60(void);\nvoid func_0014CC38(',
+                               'extern int func_002205A0(int),func_00220AE0(int,int),func_00238F60(void);\n'
+                               'extern "C" int port_touch_camera_step(void *camera);\nvoid func_0014CC38('),
+                              ('text', '            value = r->x13D9 ? r->x1260 : r->x1198;\n',
+                               '            value = (r->x13D9 ? r->x1260 : r->x1198) || port_touch_camera_step(s);\n')],
     # The EE's va_start (gcc 2.95 MIPS builtins); on i386 va_list is a char * too.
     'unsorted/00234FB0.c': [('text', VA_START_EE, VA_START)],
     'unsorted/002350E8.c': [('text', VA_START_EE, VA_START)],

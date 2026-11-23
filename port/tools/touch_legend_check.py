@@ -12,7 +12,9 @@ desktop with touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no controll
   the footer's BACK there is the pause menu again, its SELECT (on RESUME) resumes the race.
 - camera: a single race; four taps on the camera button, each must change the view (the window's
   picture after a tap differs from the one before it far more than two pictures with no tap between),
-  and of two quick taps the second waits for the game's bail window (SELECT twice), so it steps too.
+  and of two quick taps the second waits for the game's bail window (SELECT twice), so it steps too;
+  no pad state sent in the run carries Up (the step goes to the game's camera alone, never to the
+  rider's Up, which the air pitch reads too).
 
 Each step is confirmed by the menus' mouse trace (DHD_MOUSE_TRACE=1: the cursor, the rider, the
 popup) or the touch log. Pictures in OUT/<scenario>. Exit 0 when every scenario passes."""
@@ -222,6 +224,10 @@ def camera(exe, out):
     if min(steps) < max(3 * still, 4.0):
         return 'a camera tap left the picture as it was (%.1f vs %.1f with no tap)' % (min(steps), still)
     sends = re.findall(r'touch log: sent (\w+) .* race (\d+) ms', log)
+    # the step is the camera's alone: the pad never carries Up, which the race reads as the air pitch too
+    ups = [(b, ms) for b, ms in sends if int(b, 16) & UP]
+    if ups:
+        return 'a camera tap sent the pad\'s Up (the air pitch reads it): %r' % ups[:4]
     quick = [(b, int(ms)) for b, ms in sends if int(ms) >= 26000 and int(b, 16) & 1]
     if len(quick) < 2 or not any(ms - quick[0][1] >= 450 for _, ms in quick):
         return 'the second quick camera tap did not wait for the bail window: %r' % quick

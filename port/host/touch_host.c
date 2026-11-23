@@ -832,6 +832,7 @@ void host_service_touch_field(uint32_t address)
     h->hud_mode = touch_hud_mode(touch);
     h->leave_race = touch_take_ask(touch) == TOUCH_ASK_LEAVE_RACE;
     h->freeze = touch_freeze(touch);
+    h->camera_step = touch_take_camera_step(touch);   /* view 0's camera takes it (finding 277) */
     int own = touch_owns_touches(touch);
     if (own != SDL_GetAtomicInt(&owns)) {   /* who a tap goes to: a menu that ignores taps shows here (finding 218) */
         float kx = 0, ky = 0, khw = 0, khh = 0;

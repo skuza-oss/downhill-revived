@@ -197,6 +197,9 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *left_x, uint8_t *left
 
 /* Outputs since the last call, then cleared. */
 int touch_take_buzz(Touch *t);
+/* The camera button's step (finding 277): 1 once when a camera tap asks for the next view; the host
+   passes it to the core (HostTouch.camera_step), whose camera alone takes it. */
+int touch_take_camera_step(Touch *t);
 int touch_take_ask(Touch *t);
 /* Saved settings that changed since the last call: TOUCH_SAVED_* bits (0 none) and a copy in *out.
    Hints shown change touch_hints only; the layout (touch_edits) changes only when the layout
