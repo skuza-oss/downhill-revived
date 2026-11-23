@@ -1883,9 +1883,11 @@ static int latency_on(void)
     return latency;
 }
 
-void input_latency_seen(double at)
+void input_latency_seen(void)
 {
-    if (latency_on()) __atomic_store(&latency_seen_at, &at, __ATOMIC_RELEASE);
+    if (!latency_on()) return;
+    double at = host_wall_seconds();
+    __atomic_store(&latency_seen_at, &at, __ATOMIC_RELEASE);
 }
 
 /* The game thread's read of player 1 (host_pad_device): a button down that wasn't, a sample. */

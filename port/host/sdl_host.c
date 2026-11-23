@@ -127,7 +127,7 @@ static void dispatch(const SDL_Event *e)
         e->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
         /* DHD_INPUT_LATENCY (port/hle/host.c, finding 280): when SDL's thread handed the press on. Not
            the event's time stamp: Windows stamps a key with GetMessageTime, a 15.6 ms tick (finding 280). */
-        input_latency_seen(host_wall_seconds());
+        input_latency_seen();
     }
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:

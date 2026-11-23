@@ -25,6 +25,7 @@ void gs_window_tick(void) {}
 int touch_host_event(const union SDL_Event *e) { (void)e; return 0; }  /* touch_host.c's: no touch here */
 void touch_host_tick(void) {}
 double host_pacing_period(void) { return 1.0 / 60; }  /* host.c's, for keyboard.c's field timing */
+void input_latency_seen(void) {}  /* host.c's DHD_INPUT_LATENCY */
 
 /* A player's pad as the game gets it: the default layout, the game's dead zone. */
 static int read_pad(int player, HostPad *p)
