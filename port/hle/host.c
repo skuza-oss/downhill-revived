@@ -1826,72 +1826,107 @@ void pacing_present(double due, double began, double handed)
      input latency: field F (riding|menus, menu M; +N to its picture): host to the game's read A ms | read to the picture
      handed on B | to the presenter C | held to its due D | present E | read to presented T ms |
      then the display's next refresh in R ms (DWM, Windows)
-   "host" is when SDL's thread handed the key or button on (sdl_host.c's dispatch); the game's
-   read is the field's last pad read before the EE runs its frame (pad_refresh after the
-   just-in-time wait, else pad_vsync); the picture is the first one handed on after that read (the
-   first the game could draw from it). What the game itself takes before a press shows (its own
-   frames between reading a press and drawing what it did) is not in the line. Host side only. */
+   "host" is when SDL's thread handed the key or button on (sdl_host.c's dispatch); the game's read
+   is the field's last pad read, the state the game's frame gets (pad_refresh after the just-in-time
+   wait, else pad_vsync); the picture is the first one handed on after that read (the first the game
+   could draw from it). A sample is taken only when what it says is certain: one new button in the
+   game's pad state and exactly one key or button event from SDL since the field before (not L1,
+   R1, L2 or R2, which a trigger can press without an event). What the game itself takes before a
+   press shows (its own frame between reading a press and drawing what it did) is not in the line.
+   Host side only.
+
+   Threads: SDL's stamps a press (a time, then a count); the game thread reads the pad and, at the
+   next VBLANK, takes a sample and hands it to the presenter (state 2); the presenter claims it for
+   its picture (2 to 3) and gives it back when shown (0). The game thread takes back only a sample
+   the presenter has not claimed (2 to 0, after a second: never shown, minimised). */
 extern uint64_t kernel_vsync_count;
-static int latency = -1;
-static volatile double latency_seen_at;     /* SDL's thread: the newest press, until a read takes it */
+static int latency;  /* input_latency_init, before the game's and SDL's threads read it */
+enum { LATENCY_SEEN = 4 };
+static double latency_seen_at[LATENCY_SEEN];  /* SDL's thread, __atomic: press n's time at n % 4 */
+static unsigned latency_seen_count;           /* SDL's thread, __atomic: presses so far */
 static struct {
     double seen, take, handed, began, ready, call;
     uint64_t field, picture;
-    int menu, riding, lines;
-} lat;
-static atomic_int lat_state;  /* 0 none, 1 read (EE), 2 handed on (EE), 3 at the presenter (render thread) */
+    int menu, riding;
+} lat;  /* the game thread's in state 0, the presenter's from its claim (3) */
+static atomic_int lat_state;  /* 0 none, 2 handed to the presenter, 3 claimed by it */
+static struct { uint16_t buttons; double at, seen; unsigned count; uint64_t field; int menu, riding; } lat_read;  /* game thread */
 
-static int latency_on(void)
+static int latency_on(void) { return latency; }
+
+void input_latency_init(void)
 {
-    if (latency < 0) latency = getenv("DHD_INPUT_LATENCY") && atoi(getenv("DHD_INPUT_LATENCY")) != 0;
-    return latency;
+    const char *on = getenv("DHD_INPUT_LATENCY");
+    latency = on && atoi(on) != 0;
 }
 
 void input_latency_seen(void)
 {
-    if (!latency_on()) return;
+    if (!latency) return;
     double at = host_wall_seconds();
-    __atomic_store(&latency_seen_at, &at, __ATOMIC_RELEASE);
+    unsigned n = __atomic_load_n(&latency_seen_count, __ATOMIC_RELAXED) + 1;
+    __atomic_store(&latency_seen_at[n % LATENCY_SEEN], &at, __ATOMIC_RELAXED);
+    __atomic_store_n(&latency_seen_count, n, __ATOMIC_RELEASE);
 }
 
-/* The game thread's read of player 1 (host_pad_device): a button down that wasn't, a sample. */
+/* The game thread's read of player 1 (host_pad_device): the newest is the one its frame gets. */
 static void latency_take(const HostPad *in)
 {
-    static uint16_t before;
-    uint16_t pressed = in->buttons & (uint16_t)~before;
-    before = in->buttons;
-    double now = host_wall_seconds(), seen, none = 0;
-    __atomic_exchange(&latency_seen_at, &none, &seen, __ATOMIC_ACQ_REL);
-    int state = atomic_load(&lat_state);
-    if (state && now - lat.take > 1) atomic_store(&lat_state, state = 0);  /* never presented (minimised) */
-    /* the field's last read is the one the game takes: pad_refresh after the just-in-time wait */
-    if (state == 1 && kernel_vsync_count == lat.field) lat.take = now;
-    if (!pressed || state || now - lat.take < 0.3 || lat.lines >= 400) return;
-    lat.seen = seen > 0 && seen <= now && now - seen < 0.5 ? seen : now;
-    lat.take = now;
-    lat.field = kernel_vsync_count;
-    lat.menu = *(volatile int32_t *)GUEST(0x0829DED8);  /* the shell's menu word (kernel.c's stall line) */
-    lat.riding = riding_controls();
-    atomic_store(&lat_state, 1);
+    unsigned count = __atomic_load_n(&latency_seen_count, __ATOMIC_ACQUIRE);
+    __atomic_load(&latency_seen_at[count % LATENCY_SEEN], &lat_read.seen, __ATOMIC_RELAXED);
+    lat_read.count = count;
+    lat_read.buttons = in->buttons;
+    lat_read.at = host_wall_seconds();
+    lat_read.field = kernel_vsync_count;
+    lat_read.menu = *(volatile int32_t *)GUEST(0x0829DED8);  /* the shell's menu word (kernel.c's stall line) */
+    lat_read.riding = riding_controls();
 }
 
-/* EE thread, the VBLANK: the first picture handed on after the read is the one to follow. */
+/* The game thread at the VBLANK: the field before's last read against the one before it; the first
+   picture handed on after it is the one to follow. */
 static void latency_handoff(void)
 {
-    if (atomic_load(&lat_state) != 1) return;
-    lat.handed = host_wall_seconds();
+    static uint16_t committed;
+    static unsigned committed_count;
+    static double last_sample, handed_at;
+    static int samples;
+    double now = host_wall_seconds();
+    int state = atomic_load(&lat_state);
+    if (state == 2 && now - handed_at > 1 && atomic_compare_exchange_strong(&lat_state, &state, 0)) state = 0;
+    if (lat_read.field != kernel_vsync_count) return;  /* no read this field */
+    uint16_t pressed = lat_read.buttons & (uint16_t)~committed & (uint16_t)~(PAD_L1 | PAD_R1 | PAD_L2 | PAD_R2);
+    unsigned events = lat_read.count - committed_count;
+    committed = lat_read.buttons;
+    committed_count = lat_read.count;
+    if (state || !pressed || (pressed & (pressed - 1)) || events != 1 || now - last_sample < 0.3 || samples >= 400) return;
+    if (!(lat_read.seen > 0 && lat_read.seen <= lat_read.at && lat_read.at - lat_read.seen < 0.5)) return;
+    lat.seen = lat_read.seen;
+    lat.take = lat_read.at;
+    lat.field = lat_read.field;
+    lat.menu = lat_read.menu;
+    lat.riding = lat_read.riding;
+    lat.handed = handed_at = now;
     lat.began = handed_began;
     lat.picture = kernel_vsync_count + 1;  /* the field this VBLANK starts (vsync counts after the handoff) */
+    last_sample = now;
+    samples++;
     atomic_store(&lat_state, 2);
 }
 
 /* The presenter: in pacing_present, before (ready) and after (call) the hold to the due time. */
+static int lat_claimed;  /* the presenter's thread */
 static void latency_present(double began, double ready)
 {
-    if (atomic_load(&lat_state) != 2 || began != lat.began) return;
+    if (lat_claimed) lat_claimed = 0, atomic_store(&lat_state, 0);  /* the last claimed picture was not presented */
+    int state = 2;
+    if (atomic_load(&lat_state) != 2 || !atomic_compare_exchange_strong(&lat_state, &state, 3)) return;
+    if (began != lat.began) {
+        atomic_store(&lat_state, began > lat.began ? 0 : 2);  /* a later picture: the sample's was never shown */
+        return;
+    }
     lat.ready = ready;
     lat.call = host_wall_seconds();
-    atomic_store(&lat_state, 3);
+    lat_claimed = 1;
 }
 
 /* The display's next refresh after `at`, from DWM's newest vblank and period (0: unknown). */
@@ -1928,7 +1963,8 @@ static double latency_refresh_after(double at, double *period)
 
 void input_latency_presented(void)
 {
-    if (!latency_on() || atomic_load(&lat_state) != 3) return;
+    if (!latency || !lat_claimed) return;
+    lat_claimed = 0;
     double done = host_wall_seconds(), period, refresh = latency_refresh_after(done, &period);
     char display[96] = "";
     if (refresh > 0)
@@ -1940,7 +1976,6 @@ void input_latency_presented(void)
             (unsigned long long)(lat.picture - lat.field), (lat.take - lat.seen) * 1e3,
             (lat.handed - lat.take) * 1e3, (lat.ready - lat.handed) * 1e3, (lat.call - lat.ready) * 1e3,
             (done - lat.call) * 1e3, (done - lat.take) * 1e3, display);
-    lat.lines++;
     atomic_store(&lat_state, 0);
 }
 

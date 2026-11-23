@@ -82,6 +82,7 @@ void pacing_present(double due, double began, double handed);
 void pacing_waited(double from, double to);  /* the native render thread took a picture that waited since `from` */
 /* DHD_INPUT_LATENCY=1 (host.c, finding 280): one dhd.log line per sampled press of player 1, the
    time it spent in each stage from the host to the presented picture. */
+void input_latency_init(void);  /* the main thread, before the game's and SDL's threads read the setting */
 void input_latency_seen(void);  /* SDL's thread: it hands a key or button on now */
 void input_latency_presented(void);  /* the presenter: the picture pacing_present held is presented */
 enum { PAD_SELECT = 0x0001, PAD_L3 = 0x0002, PAD_R3 = 0x0004, PAD_START = 0x0008, PAD_UP = 0x0010,

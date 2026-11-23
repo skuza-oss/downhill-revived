@@ -124,7 +124,7 @@ static void dispatch(const SDL_Event *e)
 {
     if (touch_host_event(e)) return;  /* the touch controls' (touch_host.c): Back, a touch's mouse in a race */
     if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
-        e->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
+        e->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN || e->type == SDL_EVENT_JOYSTICK_HAT_MOTION) {
         /* DHD_INPUT_LATENCY (port/hle/host.c, finding 280): when SDL's thread handed the press on. Not
            the event's time stamp: Windows stamps a key with GetMessageTime, a 15.6 ms tick (finding 280). */
         input_latency_seen();
@@ -213,6 +213,7 @@ int sdl_host_main(int (*game)(void *), void *arg)
     host_thread_name("sdl");
     main_thread = SDL_GetCurrentThreadID();
     slot_lock = SDL_CreateMutex();
+    input_latency_init();  /* DHD_INPUT_LATENCY, read once before the threads (host.c) */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     SDL_SetMainReady();  /* SDL's own main is not used: SDL_Init would refuse without it */
 #endif
