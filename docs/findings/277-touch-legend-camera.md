@@ -25,6 +25,8 @@ page and sees the game react; the existing touch checks (`touch_continue_check.p
 - [x] 2026-11-22: both causes, on the code and in hidden runs (below)
 - [x] 2026-11-23: the legend bar's taps, the camera step, unit tests, `touch_legend_check.py`,
   the checks (Result)
+- [x] 2026-11-23: review round: the step reaches the camera alone (no pad Up), chords drained in
+  one batch, the bar only of the picture on screen (Review below)
 
 ## What was true
 
@@ -80,14 +82,26 @@ never reaches it (the top buttons are on the action side). Nothing there takes o
   the shop, not by `func_001BAF10`), BONUS PURCHASES' items, the track chooser's ✕ (its bar 4 has
   no SELECT word); where a bar word lies under one of them, the bar's tap comes first and presses
   the button the bar shows.
-- **The camera step on the lift**: a camera press with nothing else pressed while it was down ends
-  as SELECT + d-pad Up for PRESS_FIELDS, SELECT held throughout (one SELECT: never a bail); a press
-  the game never read goes as both at once. A press combined with another (a button, PEDAL, the
-  D-pad, the trick stick; `camera_mark`) stays SELECT alone, so look back (SELECT + L2) and the
-  D-pad's own camera work as on a pad. On the lift, not the touch: only then is it known that
-  nothing else came. Up and not Down: Up cycles all four views and wraps.
-- **Log, don't ask**: each camera press says what it sent (`touch: camera: the next view (SELECT +
-  Up)`, `..., after the bail window`, `... SELECT with another button`), and on phones the screen
+- **The bar of the picture on screen only**: `port_legend_bar` also notes the shell frame
+  (`port_shell_frame`'s count), the screen (`D_0029DED8`) and the popup up; a tap uses the bar only
+  when it was drawn in the latest shell frame, by the screen and under the popup up now (the
+  VBLANK, where `menu_mouse_field` runs, comes between a frame's draw and the next frame's
+  `port_shell_frame`). Before, any bar drawn in the last 8 fields counted.
+- **The camera step on the lift, to the camera alone**: a camera press with nothing else pressed
+  while it was down holds SELECT PRESS_FIELDS past its lift (one SELECT: never a bail) and, in the
+  field that SELECT goes out (after the bail window too), asks for the next view
+  (`touch_take_camera_step`, `HostTouch.camera_step`). The core keeps the ask 8 fields, and a
+  patch gives it to the game's camera only: `func_0014CC38`'s read of the rider's Up (SELECT held
+  + Up: `func_0014D208(s, 0)`, the next view) also takes it, view 0's camera, once
+  (`port_touch_camera_step`). No d-pad Up is sent: the rider's Up (+0x1198) is also the air
+  pitch's input (`func_0012DFD0`, read by `func_00137B70`), so an Up sent in a jump tilted the
+  bike. A press combined with another (a button or PEDAL, sent or still waiting, the D-pad, the
+  trick stick, a pulse; `camera_chord`, run at every touch down, at the camera's release and at
+  each update) asks for none, so look back (SELECT + L2) and the D-pad's own camera work as on a
+  pad. On the lift, not the touch: only then is it known that nothing else came. Next, not back:
+  the next view cycles all four and wraps.
+- **Log, don't ask**: each camera press says what it sent (`touch: camera: the next view (SELECT
+  and the camera's step)`, `..., after the bail window`, `... SELECT with another button`), and on phones the screen
   line (size, dpi, gesture insets, cutout) is in dhd.log at every change, not only with
   `DHD_TOUCH_LOG`; `touch: the camera button at X,Y mm` beside Pause's place.
 
@@ -98,6 +112,21 @@ never reaches it (the top buttons are on the action side). Nothing there takes o
 - The bar's pictures on a 16:9 phone (the issue's screenshot) and the trace's ranges agree: view x
   25 of the 640-wide shell is the 4:3 picture's left edge plus 4 %.
 
+## Review
+
+A review of the branch found three bugs, all real:
+
+1. The step was a d-pad Up in the pad, and the race reads the rider's Up as the air pitch too
+   (`func_0012DFD0` reads +0x1198 / +0x119C, the same words `func_0014CC38` reads for the
+   camera): a camera tap in a jump changed the bike's pitch and landing. Now no Up is sent; the
+   camera's own read takes the step (Decisions).
+2. A quick camera tap with L2 (or PEDAL) held, its down and up drained in one batch, asked for
+   the step: `camera_mark` ran only in the update, after the lift. Now `camera_chord` runs as the
+   touches come too (every down, the camera's release).
+3. After the rider's ✕ the rider screen's bar stayed valid 8 fields on RIDER SELECTED (screen 33):
+   a quick tap where PREV was sent Left. Now only the bar of the latest frame, screen and popup
+   counts.
+
 ## Result
 
 Commits on `fix/touch-legend-camera`: the lane plan; the legend bar by taps; the camera step; the
@@ -105,17 +134,22 @@ check tool, the docs and this result.
 
 - Unit tests: `test_menu_pads` (the bar's texts 0 and 1: every letter of each word, each glyph,
   PREV Up / NEXT Down on 0, Left / Right and INFO's Square on 1, the gap before SELECT nobody's);
-  `test_touch` `test_camera_step` (both presets: a camera tap is one SELECT with Up joining it for
-  3 fields after the lift, never a SELECT gap; a tap the game never read is SELECT + Up at once; a
-  camera press with L2's bar (Classic) or PEDAL (Thumb zones) down during it sends no Up).
+  `test_touch` `test_camera_step` (both presets: a camera tap is one SELECT, held past the lift,
+  never a gap, and one step in the lift's field, never a pad Up; a tap the game never read: the
+  step with its SELECT; a second tap in the bail window: its step goes with its later SELECT; a
+  camera press with L2's bar (Classic) or PEDAL (Thumb zones) down during it, with the other held
+  and the camera's down and up in one batch, and all four touches in one batch: no step).
 - Hidden runs (`port/tools/touch_legend_check.py`, 1600x720 at 20:9, `DHD_TOUCH_MOUSE=1`, no
   controller): `menus` PASS: on the main menu NEXT (cursor 0 → 1), PREV (→ 0), SELECT (the rider
   screen); there NEXT (rider 1 → 2), PREV (→ 1), INFO (the rider's page, bar 2), BACK (the main
-  menu), each tap logged `the legend bar's <button>`. `pause` PASS: no bar over the pause menu; OPTIONS
+  menu), each tap logged `the legend bar's <button>`; SELECT again, the rider's SELECT: RIDER
+  SELECTED, the bar said gone before that screen's first trace line, and a tap where PREV was
+  taken as no legend word. `pause` PASS: no bar over the pause menu; OPTIONS
   by its row, the footer's BACK (the pause menu again), the footer's SELECT on RESUME (the race goes
   on). `camera` PASS: four taps at race 12, 15, 18, 21 s, each changes the picture (mean difference
   13.5, 17.2, 29.8, 27.1 against 3.1 with no tap; pictures: close, first person, far, default), two
-  taps 0.25 s apart: the second waited for the bail window and stepped the view, no bail. Before the
+  taps 0.25 s apart: the second waited for the bail window and stepped the view, no bail; no pad
+  state sent in the run carries Up. Before the
   fix (the same touches on this branch's build before the camera change, and `DHD_RACE_PAD` SELECT
   alone): no view change.
 - Existing checks on this build: `touch_continue_check.py` (shop, four card taps),
