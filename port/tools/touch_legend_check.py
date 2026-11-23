@@ -6,7 +6,10 @@ desktop with touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no controll
 - menus: a menu script to the main menu only, then taps only, each on a word of the legend bar at the
   bottom (aimed from the bar's ranges in the mouse trace): NEXT moves the cursor down, PREV up, SELECT
   opens the rider screen; there NEXT and PREV change the rider, INFO opens the rider's page (its bar
-  changes) and BACK there is the main menu (the game's own: a pad's Triangle does the same).
+  changes) and BACK there is the main menu (the game's own: a pad's Triangle does the same). Then SELECT
+  again and the rider's SELECT: RIDER SELECTED (screen 33) draws no bar, so none may be said to show
+  there from its first field (the rider screen's must not linger), and a tap where PREV was is that
+  screen's own (no legend word, no Left).
 - pause: a menu script to a single race (touch_pause_check's), then taps: Pause, MORE; the pause pages
   draw no legend bar (none may be said to show), their legend is the popup's footer: OPTIONS by its row,
   the footer's BACK there is the pause menu again, its SELECT (on RESUME) resumes the race.
@@ -116,7 +119,38 @@ def menus(exe, out):
         g.wait_log(r'mouse trace: legend bar 2 ', 30)
         touch.picture(g, 'rider-info')
         time.sleep(1)   # BACK on the rider's page is the rider screen's own BACK: the main menu (as a pad's Triangle)
-        return r.tap_word(TRIANGLE, r'mouse trace: screen 15 cursor', 'rider page BACK')
+        problem = r.tap_word(TRIANGLE, r'mouse trace: screen 15 cursor', 'rider page BACK')
+        if problem:
+            return problem
+        time.sleep(1.5)
+        mark = len(g.log())
+        # the rider screen comes back as it was left: on the rider's page (bar 2), as with a pad
+        problem = r.tap_word(CROSS, r'screen 3 rider \d+ info \d', 'main menu SELECT again')
+        if problem:
+            return problem
+        if not r.wait(r'mouse trace: legend bar [12] ', mark, 30):
+            return "the rider screen's legend bar did not show again"
+        time.sleep(2)
+        prev = bar(g.log())[1].get(LEFT)
+        mark = len(g.log())
+        problem = r.tap_word(CROSS, r'mouse trace: screen 33\b', 'rider SELECT')
+        if problem:
+            return problem
+        tapped = len(g.log())
+        touch.tap(g, *prev)   # where PREV was, at once
+        time.sleep(2)
+        touch.picture(g, 'rider-selected')
+        log = g.log()
+        after = log[mark:]
+        gone, selected = after.find('mouse trace: legend bar gone'), re.search(r'mouse trace: screen 33\b', after)
+        selected = selected.start() if selected else -1
+        stray = re.findall(r'menu mouse: click at .*', log[tapped:])
+        print('rider selected: bar gone at %d, screen 33 at %d; the tap where PREV was: %s' % (gone, selected, stray), flush=True)
+        if gone < 0 or selected < 0 or gone > selected:
+            return "the rider screen's legend bar was still taken as shown on RIDER SELECTED"
+        if stray:
+            return 'a tap where PREV was on RIDER SELECTED was taken as a legend word: %r' % stray
+        return None
     finally:
         g.stop()
 

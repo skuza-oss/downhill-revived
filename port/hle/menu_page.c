@@ -1151,6 +1151,7 @@ typedef struct { short align, style, x, y; char text[SHELL_TEXT]; } ShellText;
 static ShellText shell_texts[2][SHELL_TEXTS];
 static int shell_count[2], shell_fill;  /* shell_fill: the frame being drawn; the other is the last one */
 static unsigned fields, shell_seen;     /* fields: menu_mouse_field's count; shell_seen: at the last shell frame */
+static unsigned shell_frames;           /* port_shell_frame's count */
 static int shell_ran;                   /* a shell frame has run: the game's views exist (issue #11) */
 
 void port_shell_frame(void)
@@ -1160,6 +1161,7 @@ void port_shell_frame(void)
     shell_count[shell_fill] = 0;
     shell_seen = fields;
     shell_ran = 1;
+    shell_frames++;
 }
 
 /* The front end runs: a shell frame in the last 8 fields. Before the first one there are no views
@@ -1172,25 +1174,36 @@ static int shell_running(void) { return shell_ran && fields - shell_seen < 8; }
    shell's lists, the rider screen's with □ INFO, the shop's, the track chooser's, the game's
    popups') is one function, func_001BAF10(obj, index): the index-th of five texts, left-aligned at
    view 0's x 25, y 199 in one size (0-2) or y 204 in a smaller one (3-4). The patch reports each
-   draw (port_legend_bar); a tap on a word of the bar drawn last presses its button, as a pad's
-   would, on every screen that shows it. The words' ranges are finding 266's (menu_legend_ranges):
-   each button from its glyph to its word's end, never overlapping, nothing between words. */
+   draw (port_legend_bar); a tap on a word of the bar presses its button, as a pad's would, on
+   every screen that shows it. Only a bar of the picture on screen counts: drawn in the latest
+   shell frame (the VBLANK, and so menu_mouse_field, comes between the frame's draw and the next
+   frame's port_shell_frame), on the screen and under the popup that are up now. A screen that
+   changes and draws no bar (RIDER SELECTED after the rider's ✕) leaves none behind for a quick
+   tap. The words' ranges are finding 266's (menu_legend_ranges): each button from its glyph to
+   its word's end, never overlapping, nothing between words. */
 extern const char D_0028EFA8[], D_0028EFD8[], D_0028F008[], D_0028F038[], D_0028F058[];
+extern int32_t D_0029DED8;            /* the shell's screen */
 enum { BAR_X = 25, BAR_FIELDS = 8 };
-static int bar_index = -1;
-static unsigned bar_field;
+static int bar_index = -1, bar_screen;
+static unsigned bar_field, bar_frame;
+static void *bar_popup;
+
+static void *popup_now(void) { return menu_popup_up() ? *(void **)(D_003F52D0 + M_MENU) : NULL; }
 
 void port_legend_bar(int index)
 {
-    bar_index = index, bar_field = fields;
+    bar_index = index, bar_field = fields, bar_frame = shell_frames;
+    bar_screen = D_0029DED8, bar_popup = popup_now();
 }
 
-/* The bar drawn in the last BAR_FIELDS fields: its text, its line's y and its buttons' ranges in
-   view 0's x; 0 when none is shown. */
+/* The bar of the picture on screen: its text, its line's y and its buttons' ranges in view 0's x;
+   0 when none is shown (none drawn in the latest shell frame, or by another screen or popup, or
+   the front end has stopped: no frame in BAR_FIELDS fields). */
 static int bar_ranges(MenuLegendRange *ranges, int *y, const char **shown)
 {
     const char *const texts[5] = {D_0028EFA8, D_0028EFD8, D_0028F008, D_0028F038, D_0028F058};
-    if (bar_index < 0 || bar_index > 4 || fields - bar_field > BAR_FIELDS) return 0;
+    if (bar_index < 0 || bar_index > 4 || bar_frame != shell_frames || fields - bar_field > BAR_FIELDS ||
+        bar_screen != D_0029DED8 || bar_popup != popup_now()) return 0;
     const char *text = texts[bar_index];
     int big = bar_index < 3, length = (int)strnlen(text, 0x30), prefix[0x31];
     char saved[0x20], part[0x31];
@@ -1271,7 +1284,6 @@ static const ShellList shell_lists[] = {
 };
 enum { SHELL_TITLE = 0, SHELL_FLIGHT = 32, SHELL_SELECTED = 33, SHELL_TO_SHOP = 34 };
 static int carousel(int screen) { return screen >= 3 && screen <= 6; }  /* rider select (func_001F24B8) */
-extern int32_t D_0029DED8;            /* the shell's screen */
 extern int32_t D_0029DF68, D_0029DEF0, D_004C6910[];  /* the rider screen's player, its INFO page; each player's rider */
 extern char D_004C6560[];             /* the shell's text styles: 0x58 bytes each, +0x48 glyph sizes */
 
