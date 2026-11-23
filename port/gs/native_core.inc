@@ -162,7 +162,7 @@ typedef struct {
     int movie_on;
     uint64_t field;
     double time;                     /* host wall seconds at vsync */
-    double due, began;               /* when to present it (0: at once), when its pad was read (kernel.c) */
+    double due, began, handed;       /* when to present it (0: at once), when its pad was read, when the EE handed it on (kernel.c) */
     NativeSegment *segments;         /* DHD_INTERP: the vertices of each GIF tag */
     unsigned segment_count, segment_capacity;
     int32_t *pair;                   /* DHD_INTERP: each segment's partner in the older field, or -1 */
@@ -328,7 +328,7 @@ typedef struct Native {
     uint64_t segment_tags;           /* GIF tags seen when the open segment started */
     uint32_t segment_key;
     double interp_hz;
-    double present_due, present_began;  /* the picture being drawn (NativeFrame due, began) */
+    double present_due, present_began, present_handed;  /* the picture being drawn (NativeFrame due, began, handed) */
     NativeFrame *older, *newer;      /* held by the render thread */
     NativeVertex *mixed;
     unsigned mixed_capacity;
@@ -2430,8 +2430,8 @@ static void native_wanted(const NativeSurface *s, unsigned want[2])
     }
 }
 
-void pacing_handed(double *due, double *began);   /* port/hle/kernel.c, just-in-time frames */
-void pacing_present(double due, double began);
+void pacing_handed(double *due, double *began, double *handed);   /* port/hle/kernel.c, just-in-time frames */
+void pacing_present(double due, double began, double handed);
 void input_latency_presented(void);   /* port/hle/host.c, DHD_INPUT_LATENCY (finding 280) */
 
 /* Full-screen 2D cards keep their 4:3 shape after eight consecutive flat
@@ -3063,7 +3063,7 @@ static int native_render_next(Native *n)
     if (spikes && host_wall_seconds() - asked >= 0.002)   /* another thread held the context */
         fprintf(stderr, "spike_lock: field=%llu start=%.9f ms=%.3f\n", (unsigned long long)f->field, asked,
                 (host_wall_seconds() - asked) * 1e3);
-    n->present_due = f->due, n->present_began = f->began;
+    n->present_due = f->due, n->present_began = f->began, n->present_handed = f->handed;
     native_picture(n, f, f->vertices, 1);
     double rs_zread = native_rstat_start();
     native_zread_after(n);
@@ -3159,13 +3159,13 @@ int gs_gpu_native(const Gs *g)
 
 void gs_native_vsync(Gs *g, unsigned *width, unsigned *height, int resize)
 {
-    double due, began;
-    pacing_handed(&due, &began);
-    gs_native_vsync_handed(g, width, height, resize, due, began, host_widescreen_flat_limit(), host_widescreen_card_drawn(),
+    double due, began, handed;
+    pacing_handed(&due, &began, &handed);
+    gs_native_vsync_handed(g, width, height, resize, due, began, handed, host_widescreen_flat_limit(), host_widescreen_card_drawn(),
                            host_widescreen_aspect());
 }
 
-void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began,
+void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began, double handed,
                             int flat_limit, int card_2d, double output_aspect)
 {
     FILE *trace = native_field_trace("registers");
@@ -3219,7 +3219,7 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
     f->field = ++n->field;
     if (n->texpack) texpack_field(n->field);
     f->time = host_wall_seconds();
-    f->due = due, f->began = began;
+    f->due = due, f->began = began, f->handed = handed;
     n->stats.frames++;
     if (n->field <= n->full_until) n->stats.full_fields++;
     if (n->trace_fields) {

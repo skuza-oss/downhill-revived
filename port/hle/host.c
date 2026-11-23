@@ -1479,7 +1479,7 @@ void host_service_presence(uint32_t a0)
 static double pacing_period=1001.0/60000.0;
 static uint64_t pacing_field;
 static double jit_due, frame_began;           /* the next picture's due; when this frame's pad was read */
-static double handed_due, handed_began;       /* the same for the picture being handed on now */
+static double handed_due, handed_began, handed_time;  /* the same for the picture being handed on now, and when */
 static volatile float work_ms[WORK_SAMPLES];  /* pad read to picture ready, by the presenter */
 static volatile unsigned work_count;
 static volatile double shown_due, shown_at;   /* the presenter's last picture: its due (0 while written), when shown */
@@ -1739,41 +1739,17 @@ void host_pacing_wait(void)
                      due, start, work * 1000, frame_began);
 }
 
-/* The picture handed on at this VBLANK: when to show it (0: at once) and when its pad was read. */
-void pacing_handed(double *due, double *began)
+/* The picture handed on at this VBLANK: when to show it (0: at once), when its pad was read, and when
+   it was handed on (0 without just-in-time frames). The game thread reads them at its vsync and they
+   travel with the picture (present.c's PresentMark, the native renderer's NativeFrame). */
+void pacing_handed(double *due, double *began, double *handed)
 {
     *due = handed_due;
     *began = handed_began;
+    *handed = handed_time;
 }
 
-/* When each of the last pictures was handed on at its VBLANK, by the pad read it was made from
-   (began): the EE thread writes (handed_note), the presenter reads its own picture's (handed_at). A
-   slot is written with began 0 first, so a reader that meets a slot being written finds no match. */
-enum { HANDED_RING = 8, HOLD_RING = 8 };
-static volatile double handed_ring_began[HANDED_RING], handed_ring_at[HANDED_RING];
-static unsigned handed_ring_next;  /* EE thread */
-
-static void handed_note(double began, double at)
-{
-    unsigned i = handed_ring_next++ % HANDED_RING;
-    handed_ring_began[i] = 0;
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    handed_ring_at[i] = at;
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    handed_ring_began[i] = began;
-}
-
-static double handed_at(double began)
-{
-    for (unsigned i = 0; i < HANDED_RING; i++) {
-        double b = handed_ring_began[i];
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        double at = handed_ring_at[i];
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        if (b == began && handed_ring_began[i] == b) return at;
-    }
-    return 0;
-}
+enum { HOLD_RING = 8 };
 
 /* The presenter's last holds (its waits for a picture's due), the presenter's thread only, and how
    much of them fell after `from` (and before `to`): time a picture handed on at `from` spent
@@ -1799,7 +1775,7 @@ static double held_since(double from, double to)
 
 /* The presenter, just before it presents a picture pacing_handed described: notes how long the
    frame took, then waits for the due time, and at least a field after its last picture. */
-void pacing_present(double due, double began)
+void pacing_present(double due, double began, double handed)
 {
     static double last_at;
     static int last_late;
@@ -1809,7 +1785,7 @@ void pacing_present(double due, double began)
             /* The time this picture waited behind pictures held for their due is no work: left in,
                a queue before the presenter read as frames longer than a field and kept a fast PC in
                the slow stretch, where the queue never drained (finding 280). */
-            double handed = handed_at(began), work = now - began - (handed > 0 ? held_since(handed, now) : 0);
+            double work = now - began - (handed > 0 ? held_since(handed, now) : 0);
             unsigned i = work_count;
             work_ms[i % WORK_SAMPLES] = (float)(work * 1000);
             work_count = i + 1;
@@ -1985,7 +1961,7 @@ void host_pacing_handoff(int fresh)
 {
     handed_due = fresh ? jit_due : 0;
     handed_began = frame_began;
-    if (fresh) handed_note(frame_began, host_wall_seconds());  /* pacing_present's work samples */
+    handed_time = fresh ? host_wall_seconds() : 0;  /* pacing_present's work samples */
     if (latency_on()) latency_handoff();
 }
 void host_pacing_input(void) { frame_began=host_wall_seconds(); }

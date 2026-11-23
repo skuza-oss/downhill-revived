@@ -77,8 +77,8 @@ void host_display_aware(void);    /* the process sees real pixels (DPI aware), b
 double host_seconds(void);    /* the game clock in seconds: virtual under DHD_FRAME_CLOCK (kernel.c) */
 /* Just-in-time frames (kernel.c): the picture handed on at this VBLANK, when to show it (0: at
    once) and when its pad was read; the presenter calls pacing_present just before it presents. */
-void pacing_handed(double *due, double *began);
-void pacing_present(double due, double began);
+void pacing_handed(double *due, double *began, double *handed);  /* handed: when, host_wall_seconds */
+void pacing_present(double due, double began, double handed);
 /* DHD_INPUT_LATENCY=1 (host.c, finding 280): one dhd.log line per sampled press of player 1, the
    time it spent in each stage from the host to the presented picture. */
 void input_latency_seen(void);  /* SDL's thread: it hands a key or button on now */

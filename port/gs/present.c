@@ -1070,7 +1070,7 @@ static void present_registers(const uint64_t *mmio)
    register page as the VBLANK handlers left it, and what the game thread knew at its vsync. */
 typedef struct {
     uint64_t mmio[15];
-    double due, began;  /* pacing_handed */
+    double due, began, handed;  /* pacing_handed */
     double output_aspect;
     int32_t resize, flat_limit, card_2d;
 } PresentMark;
@@ -1083,7 +1083,7 @@ static void present_marked(const void *payload)
     memcpy(&m, payload, sizeof m);
     present_registers(m.mmio);
     gs_native_movie(&gs, NULL, 0, 0, 0);
-    gs_native_vsync_handed(&gs, &width, &height, m.resize, m.due, m.began, m.flat_limit, m.card_2d, m.output_aspect);
+    gs_native_vsync_handed(&gs, &width, &height, m.resize, m.due, m.began, m.handed, m.flat_limit, m.card_2d, m.output_aspect);
 }
 
 void gs_vsync(void)
@@ -1121,7 +1121,7 @@ void gs_vsync(void)
         if (!movie && gs_gpu_native(&gs)) {
             PresentMark m;
             memcpy(m.mmio, mmio, sizeof m.mmio);
-            pacing_handed(&m.due, &m.began);
+            pacing_handed(&m.due, &m.began, &m.handed);
             m.resize = resize_pending, m.flat_limit = host_widescreen_flat_limit();
             m.output_aspect = host_widescreen_aspect();
             m.card_2d = host_widescreen_card_drawn();
@@ -1152,9 +1152,9 @@ void gs_vsync(void)
         /* the renderer shows the picture itself, stretched over the client area */
         unsigned client_width, client_height;
         gs_window_pixels(&client_width, &client_height);
-        double due, began;
-        pacing_handed(&due, &began);
-        pacing_present(due, began);
+        double due, began, handed;
+        pacing_handed(&due, &began, &handed);
+        pacing_present(due, began, handed);
         if (!gs_gpu_present(&gs, gpu_frame ? NULL : pixels, width, height, client_width, client_height)) {
             fprintf(stderr, "gs: WebGPU presentation failed\n");
             disabled = 1;

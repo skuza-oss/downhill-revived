@@ -65,7 +65,7 @@ void gs_native_vsync(Gs *g, unsigned *width, unsigned *height, int resize);
 /* The same with the pacing times (pacing_handed), flat limit and card mode (the field's 2D drawn for
    a card, host_widescreen_card_drawn) taken at the game's vsync, for a picture the GS worker hands
    on later (present.c, deferred vsync). */
-void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began,
+void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began, double handed,
                             int flat_limit, int card_2d, double output_aspect);
 void gs_native_bench(Gs *g, int end);  /* DHD_BENCH window start (0) and end (1) */
 void gs_native_lock(Gs *g, int lock);  /* the render thread's lock (EE thread) */
