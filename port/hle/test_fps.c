@@ -3,6 +3,7 @@
 #include "../include/fps.h"
 #include "../host/host_api.h"
 #include "pace_grid.h"
+#include "pace_holds.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -65,9 +66,60 @@ static void pace_grid_checks(void)
     now+=3.0/60;
     assert(pace_grid_next(&grid,now,1.0/60)==0 && grid.base==now);
 }
+/* The presenter's holds a picture's work sample leaves out (pace_holds.h, finding 280), on a fake
+   clock in seconds. */
+static void pace_holds_checks(void)
+{
+    const double P=1.0/60;
+    /* a hold of the last picture while the GS worker still draws this one costs it nothing: a 22 ms
+       frame (read at 0, handed at 2 ms, drawn by 20 ms, at the presenter at 22 ms) reads 22 ms */
+    PaceHolds h={{0}};
+    pace_holds_hold(&h,0.001,0.012,0.012);
+    pace_holds_waited(&h,0.020,0.020);
+    assert(pace_holds_blocked(&h,0.002,0.022)==0);
+    /* drawn at 6 ms, inside the hold: the 6 ms it waited for the hold to end are left out */
+    PaceHolds part={{0}};
+    pace_holds_hold(&part,0.001,0.012,0.012);
+    pace_holds_waited(&part,0.006,0.012);
+    assert(fabs(pace_holds_blocked(&part,0.002,0.022)-0.006)<1e-12);
+    /* a 1 ms hold the thread woke from 8 ms late: 1 ms left out, the overrun stays work */
+    PaceHolds late={{0}};
+    pace_holds_hold(&late,0.010,0.011,0.019);
+    pace_holds_waited(&late,0.005,0.019);
+    assert(fabs(pace_holds_blocked(&late,0,0.03)-0.001)<1e-12);
+    /* two pictures waiting through the same hold: counted once */
+    PaceHolds both={{0}};
+    pace_holds_hold(&both,0,0.010,0.010);
+    pace_holds_waited(&both,0,0.004);
+    pace_holds_waited(&both,0.002,0.010);
+    assert(fabs(pace_holds_blocked(&both,0,1)-0.010)<1e-12);
+    /* The queue of finding 280: 4 pictures handed on at once (a load), then one a field on the grid
+       (the slow stretch); the GS worker draws each in 2 ms and hands it to the render thread's one
+       slot, which draws in 2 ms, and the presenter shows one a field. The queue stays, so every
+       picture reaches the presenter 2.4 fields after its read; left out, the holds leave 7 ms. */
+    PaceHolds q={{0}};
+    double handed[64],waiting[64],push[64],take[64],shown=-1,last_push=0,last_take=0;
+    const double e=0.001,g=0.002,r=0.002;
+    for (int j=0;j<64;j++) {
+        handed[j]=j<4 ? 1 : 1+(j-3)*P;
+        double start=handed[j]>last_push ? handed[j] : last_push;  /* the GS worker: after the last hand-over */
+        waiting[j]=start+g;
+        push[j]=waiting[j]>last_take ? waiting[j] : last_take;     /* the slot frees when the last is taken */
+        take[j]=push[j]>shown ? push[j] : shown;                   /* the render thread: after the last present */
+        if (shown<0) take[j]=push[j];
+        pace_holds_waited(&q,waiting[j],take[j]);
+        double ready=take[j]+r,began=handed[j]-e,target=shown<0 ? ready : shown+P;
+        double raw=ready-began,work=raw-pace_holds_blocked(&q,handed[j],ready);
+        if (j>=16) assert(raw>2*P && work<P);
+        if (target>ready) pace_holds_hold(&q,ready,target,target);
+        shown=target>ready ? target : ready;
+        last_push=push[j],last_take=take[j];
+    }
+}
 int main(int argc,char **argv)
 {
     pace_grid_checks();
+    pace_holds_checks();
     int n=atoi(argv[1]);
     /* the core's guest memory: the registers at 0x10000000, PS2 RAM at 0x08000000 */
     host_putenv_s("DHD_FPS",argv[1]);  /* the host environment port_fps reads */

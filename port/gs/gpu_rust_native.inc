@@ -87,12 +87,13 @@ static void native_present(Native *n)
                          (unsigned)(cut.right - cut.left), (unsigned)(cut.bottom - cut.top));
     }
     rs = native_rstat_start();
-    if (!n->interp) pacing_present(n->present_due, n->present_began);  /* holds the picture to its due time */
+    if (!n->interp) pacing_present(n->present_due, n->present_began, n->present_handed);  /* holds the picture to its due time */
     native_rstat_add(RSTAT_PACE, rs);
     rs = native_rstat_start();
     inside = perf_log_on() ? host_wall_seconds() : 0;
     counter_present(p->surface, 1);
     if (inside) perf_present_wait(host_wall_seconds() - inside);  /* the present call itself */
+    input_latency_presented();  /* DHD_INPUT_LATENCY (host.c, finding 280) */
     native_rstat_add(RSTAT_SHOW, rs);
     native_note_presented(n);
     if (spikes) {

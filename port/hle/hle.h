@@ -77,8 +77,14 @@ void host_display_aware(void);    /* the process sees real pixels (DPI aware), b
 double host_seconds(void);    /* the game clock in seconds: virtual under DHD_FRAME_CLOCK (kernel.c) */
 /* Just-in-time frames (kernel.c): the picture handed on at this VBLANK, when to show it (0: at
    once) and when its pad was read; the presenter calls pacing_present just before it presents. */
-void pacing_handed(double *due, double *began);
-void pacing_present(double due, double began);
+void pacing_handed(double *due, double *began, double *handed);  /* handed: when, host_wall_seconds */
+void pacing_present(double due, double began, double handed);
+void pacing_waited(double from, double to);  /* the native render thread took a picture that waited since `from` */
+/* DHD_INPUT_LATENCY=1 (host.c, finding 280): one dhd.log line per sampled press of player 1, the
+   time it spent in each stage from the host to the presented picture. */
+void input_latency_init(void);  /* the main thread, before the game's and SDL's threads read the setting */
+void input_latency_seen(void);  /* SDL's thread: it hands a key or button on now */
+void input_latency_presented(void);  /* the presenter: the picture pacing_present held is presented */
 enum { PAD_SELECT = 0x0001, PAD_L3 = 0x0002, PAD_R3 = 0x0004, PAD_START = 0x0008, PAD_UP = 0x0010,
        PAD_RIGHT = 0x0020, PAD_DOWN = 0x0040, PAD_LEFT = 0x0080, PAD_L2 = 0x0100, PAD_R2 = 0x0200,
        PAD_L1 = 0x0400, PAD_R1 = 0x0800, PAD_TRIANGLE = 0x1000, PAD_CIRCLE = 0x2000, PAD_CROSS = 0x4000,

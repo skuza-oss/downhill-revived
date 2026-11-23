@@ -40,8 +40,10 @@ typedef Web NativeExact;
 volatile int gs_native_view;
 
 /* Pacing is worker.js's: every field is drawn at its vsync and shown at once. */
-void pacing_handed(double *due, double *began) { *due = 0; *began = 0; }
-void pacing_present(double due, double began) { (void)due; (void)began; }
+void pacing_handed(double *due, double *began, double *handed) { *due = *began = *handed = 0; }
+void pacing_present(double due, double began, double handed) { (void)due; (void)began; (void)handed; }
+void pacing_waited(double from, double to) { (void)from; (void)to; }
+void input_latency_presented(void) {}
 
 /* No texture packs in the browser. */
 typedef struct TexPackEntry TexPackEntry;

@@ -38,7 +38,7 @@ double host_wall_seconds(void);                                              /* 
 void host_wait_sink(_Atomic uint64_t *nanoseconds);                          /* host_sdl.c */
 unsigned host_thread_cpu(const char **names, double *seconds, unsigned max); /* host_threads.c */
 double host_pacing_period(void);                                             /* host.c */
-void pacing_handed(double *due, double *began);                              /* host.c */
+void pacing_handed(double *due, double *began, double *handed);                     /* host.c */
 extern uint64_t kernel_vsync_count;                                          /* host.c: the field */
 void graphics_wait_seconds(double out[3]);  /* graphics_queue.c: the game's, vu's and gs's queue waits */
 
@@ -336,7 +336,8 @@ static void render_line(double now)
     static int any;
     int paced;
     double requested = requested_fps(&paced), due, began;
-    pacing_handed(&due, &began);
+    double handed;
+    pacing_handed(&due, &began, &handed);
     uint64_t gpu[6];
     dhdr_perf_read(gpu, 6);
     Shown s;
