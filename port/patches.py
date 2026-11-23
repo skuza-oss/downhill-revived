@@ -300,7 +300,13 @@ PATCHES = {
     # build declares each name at its address instead (.sdata from 0x29D4A0, in order)
     'unsorted/001BA3B8.c': [('text', '#include "include_asm.h"\n', '#include "include_asm.h"\n' + STR8_DECLS),
                             ('text', '    int name = WORD4(a, b, c, d); int name##_hi = WORD4(e, f, g, h)',
-                             '    /* in the PS2 data image */')],
+                             '    /* in the PS2 data image */'),
+                            # the front end's legend bar ("▲ PREV ▼ NEXT ✕ SELECT △ BACK", the rider
+                            # screen's, the shop's, ...): which one this frame drew, so a tap on its words
+                            # presses their buttons (port/hle/menu_page.c, finding 277; host memory only)
+                            ('text', 'void func_001BAF10(void *obj, int index) {\n',
+                             'extern void port_legend_bar(int index);\n'
+                             'void func_001BAF10(void *obj, int index) {\n port_legend_bar(index);\n')],
     # func_00221888 loads and stores all four lanes of offset, whose w the C never sets: host
     # stack bytes reached the rider (obj->xDB0.w, rider +0x535C) and differed between PCs. The
     # game never reads that lane back (DHD_WATCH, finding 041); zero it so every byte is defined.
