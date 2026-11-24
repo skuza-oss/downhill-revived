@@ -875,6 +875,80 @@ static int legend_tap(void *menu, int view)
 /* MUSIC PLAYLIST > CUSTOM > MODIFY: the playlist editor (D_0043D2A0, finding 274) */
 enum { MUSIC_EDITOR = 0x08287A10u };
 
+/* A one-row picker (finding 282): the popups of the class func_0018F210 builds (ADD TRACK's songs,
+   D_00287988; MUSIC PLAYLIST's lists; a few others) draw their cursor's row alone, between ◄ ► when
+   prefixed (+0x478, "\x8D%s\x8F"), at the rows' place (func_0018FB68, the row drawer D_00287308 that
+   +0x4C8 points to; a list's is D_00287320). Left / Right move the cursor there (+0x4A0 / +0x4A4 = 2 /
+   3) and Cross takes the row shown. The other rows are nowhere on screen, so a list's hit test took a
+   tap on the shown song as row 0 and one a line lower as row 1 (issue #118: the wrong songs). On the
+   shown line: left of its words Left, right of them Right, on them Cross; hover moves nothing. */
+extern char D_00287308[];
+enum { X_DRAWER = 0x4C8 };
+static int is_picker(void *menu)
+{
+    uint32_t drawer = AT(menu, X_DRAWER, uint32_t);
+    return drawer >= 0x08000000u && drawer < 0x0A000000u &&
+           *(const uint32_t *)(uintptr_t)drawer == (uint32_t)(uintptr_t)D_00287308;
+}
+
+/* The picker's line under the pointer: its button (Left, Right, Cross), 0 off the line. */
+static uint16_t picker_button(void *menu, int view, int *mx, int *my)
+{
+    int count = AT(menu, X_COUNT, int), cursor = AT(menu, X_CURSOR, int);
+    if (!pointer(view, mx, my) || count <= 0 || count > 64 || cursor < 0 || cursor >= count) return 0;
+    const char *text = item_text((const Item *)((char *)menu + X_ITEMS) + cursor);
+    int x = AT(menu, X_ROW_X, int), y = AT(menu, X_ROW_Y, int), step = AT(menu, X_ROW_STEP, int);
+    if (!text) return 0;
+    if (step < 10) step = 10;
+    if (*my < y - 1 || *my >= y - 1 + step) return 0;
+    if (x < 0) {  /* not laid out yet: the view's middle */
+        int w = 0, h = 0;
+        func_0023D650(view, &w, &h);
+        x = w / 2;
+    }
+    char line[MENU_PAGE_TEXT + 4];
+    int prefixed = AT(menu, X_PREFIXED, int) != 0;
+    snprintf(line, sizeof line, prefixed ? "\x8D%.*s\x8F" : "%.*s", MENU_PAGE_TEXT, text);
+    int length = (int)strlen(line), width = measure(menu, X_STYLE_ON, line, length);
+    int head = prefixed ? measure(menu, X_STYLE_ON, line, 1) : 0;
+    int tail = prefixed ? width - measure(menu, X_STYLE_ON, line, length - 1) : 0;
+    int from = AT(menu, X_LEFT_ALIGNED, char) ? x : AT(menu, X_RIGHT_ALIGNED, char) ? x - width : x - width / 2;
+    uint16_t side = menu_side_button(*mx, from + head, from + width - tail);
+    return side ? side : PAD_CROSS;
+}
+
+static void picker_mouse(void *menu, int view, int left, int right, int wheel)
+{
+    if (left) {
+        int mx = -1, my = -1;
+        uint16_t b = picker_button(menu, view, &mx, &my);
+        hle_log("menu mouse: click at %d,%d: the picker's line%s\n", mx, my,
+                b == PAD_LEFT ? ", left of its words: Left" : b == PAD_RIGHT ? ", right of its words: Right"
+                : b == PAD_CROSS ? ": Cross" : ": off it");
+        if (!b) {  /* off the line: the legend's words press their buttons */
+            int l = legend_tap(menu, view);
+            if (l > 0) {
+                hle_log("menu mouse: the legend's %04x\n", l);
+                b = (uint16_t)l;
+            }
+        }
+        if (b) press(b);
+    }
+    if (right) press(PAD_TRIANGLE);
+    for (; wheel > 0; wheel--) press(PAD_LEFT);
+    for (; wheel < 0; wheel++) press(PAD_RIGHT);
+}
+
+/* A game popup with its own Left / Right (vtable slots 9 and 10 not the base's; of the game's popups
+   that are not pickers only OPTIONS > AUDIO / OTHER, D_00284FB8, finding 282): its rows are values
+   that Left / Right change, and its Cross is the page's, not a row's (func_0015F410 keeps the values
+   and closes the page), so a tap on a row must not be Cross (issue #125: a tap closed the page). */
+static int own_left_right(void *menu)
+{
+    const uint32_t *vt = AT(menu, X_VTABLE, const uint32_t *);
+    return vt && (vt[9 * 2 + 1] != D_00287218[9 * 2 + 1] || vt[10 * 2 + 1] != D_00287218[10 * 2 + 1]);
+}
+
 /* The open popup and the mouse's news this field: hover, clicks, wheel. */
 static void popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)
 {
@@ -887,6 +961,10 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
         int mx, my;
         if (pointer(view, &mx, &my) && (moved || left || wheel)) p->mouse(p, mx, my, moved, left, wheel);
         if (right) press(PAD_TRIANGLE);
+        return;
+    }
+    if (!p && is_picker(menu)) {
+        picker_mouse(menu, view, left, right, wheel);
         return;
     }
     int left_arrow, beside, side_left = 0, side_right = 0, row = row_at(menu, view, &left_arrow, &beside, &side_left, &side_right);
@@ -928,6 +1006,15 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
            tap on the cursor's row is Cross (finding 274; a phone has no hover) */
         AT(menu, X_CURSOR, int) = row;
         hle_log("menu mouse: the playlist editor's cursor to row %d\n", row);
+    } else if (left && row >= 0 && row_enabled(menu, row) && !p && own_left_right(menu)) {
+        /* a value page's row (AUDIO / OTHER, finding 282): the cursor there, and a switch (Vibration,
+           Stereo Sound, ...) its next value, the pad's Right; a row whose value is a number (a volume)
+           is only chosen: its value goes by the taps beside it or the legend's LESS / MORE. The page's
+           Cross (keep and close) is the legend's SELECT. */
+        AT(menu, X_CURSOR, int) = row;
+        int number = menu_value_is_number(item_text((const Item *)((char *)menu + X_ITEMS) + row));
+        hle_log("menu mouse: a value row: %s\n", number ? "chosen (a number)" : "Right (its next value)");
+        if (!number) press(PAD_RIGHT);
     } else if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);
@@ -1435,11 +1522,13 @@ static void trace_screens(void)
         last_popup = popup, last_rows = rows, last_cursor = cursor;
         if (popup) {
             void *m = (void *)(uintptr_t)popup;
-            hle_log("mouse trace: popup %08x vtable %08x rows %d cursor %d at %d,%d step %d align %d/%d\n", popup,
+            hle_log("mouse trace: popup %08x vtable %08x rows %d cursor %d at %d,%d step %d align %d/%d%s\n", popup,
                     (uint32_t)(uintptr_t)AT(m, X_VTABLE, void *), AT(m, X_COUNT, int), AT(m, X_CURSOR, int),
                     AT(m, X_ROW_X, int), AT(m, X_ROW_Y, int), AT(m, X_ROW_STEP, int), AT(m, X_LEFT_ALIGNED, char),
-                    AT(m, X_RIGHT_ALIGNED, char));
+                    AT(m, X_RIGHT_ALIGNED, char), is_picker(m) ? " picker" : "");
             trace_rows(m);
+            if (is_picker(m) && at >= 0 && at < rows && rows <= 64)  /* the one row it draws */
+                hle_log("  picker shows row %d: %s\n", at, now ? now : "");
             trace_legend(m);
             uint32_t child = AT(m, 0x500, uint32_t);  /* the shop's pages keep a list there */
             if (child >= 0x08000000u && child < 0x0A000000u && AT(m, X_VTABLE, uint32_t) == 0x08284190u) {

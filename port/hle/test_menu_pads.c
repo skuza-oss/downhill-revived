@@ -179,5 +179,12 @@ int main(void)
     assert(menu_side_button(200, 100, 200) == PAD_RIGHT && menu_side_button(639, 100, 200) == PAD_RIGHT);
     for (int x = -10; x < 650; x++) assert(menu_side_button(x, 110, 110) == (x < 110 ? PAD_LEFT : PAD_RIGHT));
     printf("menu pads: a tap beside a line is its Left or Right, a heading's halves its two\n");
+    /* a value row whose value is a number is only chosen by a tap (finding 282): AUDIO / OTHER's rows
+       as the trace shows them */
+    assert(menu_value_is_number("Music Volume: \t\t 50 ") && menu_value_is_number("SFX Volume:   \t\t 93"));
+    assert(menu_value_is_number("Speech Volume:\t\t 0\t"));
+    assert(!menu_value_is_number("Vibration:    \t\tOFF") && !menu_value_is_number("Stereo Sound  \t\t ON"));
+    assert(!menu_value_is_number(NULL) && !menu_value_is_number("") && !menu_value_is_number(" \t "));
+    printf("menu pads: a value row with a number is chosen by a tap, a switch steps\n");
     return 0;
 }
