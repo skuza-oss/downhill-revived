@@ -3269,6 +3269,47 @@ static void test_bar_migration(void)
     CHECK(s.edit[1][TC_L1].dx == 0 && s.edit[0][TC_L1].dx == 0);
 }
 
+/* The review of finding 283: a bar saved smaller, at a small Size setting, stacked its three buttons
+   (every tap sent L1). Whatever the Size setting and the bar's size, the three stay apart and each
+   centre sends its own buttons, on a phone and a tablet. */
+static void test_bar_migration_sizes(void)
+{
+    static const int ctl[6] = {TC_L1, TC_L2, TC_L1L2, TC_R1, TC_R2, TC_R1R2};
+    static const uint16_t sends[6] = {PAD_L1, PAD_L2, PAD_L1 | PAD_L2, PAD_R1, PAD_R2, PAD_R1 | PAD_R2};
+    static const int sizes[] = {50, 70, 85, 100, 105};
+    static const float bars[] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+    const TouchScreen *screens[2] = {&PHONE, &MINI};
+    const uint16_t all = PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2;
+    for (int sc = 0; sc < 2; sc++)
+        for (int si = 0; si < (int)(sizeof sizes / sizeof *sizes); si++)
+            for (int bi = 0; bi < (int)(sizeof bars / sizeof *bars); bi++) {
+                start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+                TouchSettings s = *touch_settings(t);
+                s.size = sizes[si];
+                char text[128];
+                snprintf(text, sizeof text, "classic.layout=2;classic.lbar=0.0,0.0,%.2f;classic.rbar=0.0,0.0,%.2f", bars[bi], bars[bi]);
+                touch_layout_parse(&s, text);
+                touch_configure(t, &s, screens[sc]);
+                field();
+                float x[6], y[6], hw[6], hh[6];
+                for (int i = 0; i < 6; i++) CHECK(touch_control(t, ctl[i], &x[i], &y[i], NULL) && touch_control_size(t, ctl[i], &hw[i], &hh[i]));
+                for (int g = 0; g < 6; g += 3)
+                    for (int i = g; i < g + 3; i++)
+                        for (int j = i + 1; j < g + 3; j++) {
+                            float gap = fmaxf(fabsf(x[i] - x[j]) - hw[i] - hw[j], fabsf(y[i] - y[j]) - hh[i] - hh[j]);
+                            if (gap < 1.0f) fprintf(stderr, "test_touch: screen %d Size %d bar %.2f: %d and %d %.2f mm apart\n", sc, sizes[si], bars[bi], ctl[i], ctl[j], gap);
+                            CHECK(gap >= 1.0f);
+                        }
+                for (int i = 0; i < 6; i++) {
+                    touch_down(t, 80, x[i], y[i], now);
+                    field();
+                    CHECK((buttons() & all) == sends[i]);
+                    touch_up(t, 80, x[i], y[i], now);
+                    fields(4);
+                }
+            }
+}
+
 /* The shapes drawn within 0.5 mm of a point. */
 static int shapes_at(float x, float y)
 {
@@ -3508,6 +3549,7 @@ int main(void)
     test_picture_band();
     test_shoulders();
     test_bar_migration();
+    test_bar_migration_sizes();
     test_hidden_controls();
     test_editor_hide();
     test_editor_alone_hide();

@@ -421,9 +421,11 @@ void touch_settings_default(TouchSettings *s)
 }
 
 /* A shoulder bar saved before finding 283 ("classic.lbar" / "classic.rbar": moved by dx, dy, sized by
-   size): its three buttons, moved as the bar was and sized about the group's middle, so a bar the
-   player made larger keeps its buttons apart (the offsets at the reference phone's scale). An entry
-   of the buttons' own, earlier or later in the text, wins. */
+   size): its three buttons, moved as the bar was and each sized as it was. A bar the player made
+   larger also spreads their centres about the group's middle (the offsets at the reference phone's
+   scale), so the grown buttons stay apart; a smaller one keeps the default spacing (pulling the
+   centres in as well stacked them at a small Size setting). An entry of the buttons' own, earlier or
+   later in the text, wins. */
 static void bar_to_buttons(TouchEdit *edits, const unsigned char *own, int right, float dx, float dy, float size)
 {
     int first = right ? TC_R1 : TC_L1;
@@ -434,10 +436,11 @@ static void bar_to_buttons(TouchEdit *edits, const unsigned char *own, int right
         x0 = fminf(x0, p[i].px - p[i].w / 2), x1 = fmaxf(x1, p[i].px + p[i].w / 2);
         y0 = fminf(y0, p[i].py - p[i].h / 2), y1 = fmaxf(y1, p[i].py + p[i].h / 2);
     }
+    float spread = fmaxf(size - 1, 0) * 1.15f;   /* the buttons outgrow the places on a tablet at Size 105 (1.34 / 1.31): 17 x 1.34 over 20.2 mm */
     for (int i = 0; i < 3; i++) {
         if (own[first + i]) continue;
         float ox = (p[i].px - (x0 + x1) / 2) * REF_W / 100, oy = (p[i].py - (y0 + y1) / 2) * REF_H / 100;
-        edits[first + i] = (TouchEdit){dx + ox * (size - 1), dy + oy * (size - 1), size, 0};
+        edits[first + i] = (TouchEdit){dx + ox * spread, dy + oy * spread, size, 0};
     }
 }
 
