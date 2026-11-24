@@ -953,22 +953,26 @@ static uint16_t picker_button(void *menu, int view, int *mx, int *my)
     return side ? side : PAD_CROSS;
 }
 
+/* Its Cross takes the row shown at the tap: Left / Right still queued would move the cursor before
+   the Cross goes out (quick taps, the wheel), so the Cross carries that row (press_at). */
 static void picker_mouse(void *menu, int view, int left, int right, int wheel)
 {
     if (left) {
-        int mx = -1, my = -1;
+        int mx = -1, my = -1, shown = AT(menu, X_CURSOR, int);
         uint16_t b = picker_button(menu, view, &mx, &my);
-        hle_log("menu mouse: click at %d,%d: the picker's line%s\n", mx, my,
+        const char *text = b == PAD_CROSS ? item_text((const Item *)((char *)menu + X_ITEMS) + shown) : NULL;
+        hle_log("menu mouse: click at %d,%d: the picker's line%s%s%s\n", mx, my,
                 b == PAD_LEFT ? ", left of its words: Left" : b == PAD_RIGHT ? ", right of its words: Right"
-                : b == PAD_CROSS ? ": Cross" : ": off it");
+                : b == PAD_CROSS ? ": Cross on the row shown: " : ": off it", text ? text : "",
+                b == PAD_CROSS && queued ? " (after the presses before it)" : "");
         if (!b) {  /* off the line: the legend's words press their buttons */
             int l = legend_tap(menu, view);
             if (l > 0) {
                 hle_log("menu mouse: the legend's %04x\n", l);
-                b = (uint16_t)l;
+                press((uint16_t)l);
             }
-        }
-        if (b) press(b);
+        } else
+            press_at(b, menu, b == PAD_CROSS ? shown : -1);
     }
     if (right) press(PAD_TRIANGLE);
     for (; wheel > 0; wheel--) press(PAD_LEFT);

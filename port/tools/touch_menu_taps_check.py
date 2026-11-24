@@ -12,7 +12,8 @@ desktop with touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no controll
   legend's BACK. MUSIC PLAYLIST: its list chosen by the picker's arrows and words (CUSTOM), USER 1,
   MODIFY, then three songs added from ADD TRACK, a one-row picker: the first song shown (top), the
   song after five taps right of the line and one left of it (middle), and the last (bottom, by taps
-  right of the line). Each time the song the picker showed must be the one the
+  right of the line), then one after three taps right and a tap on the words faster than the
+  presses go out. Each time the song the picker showed must be the one the
   editor gets, and the tapped song alone.
 
 The menus' mouse trace (DHD_MOUSE_TRACE=1) says which popup is up, the row a picker shows and what each
@@ -98,11 +99,13 @@ def switch_then_volume(r, page, rows, to_x, label):
         return None, 'the two quick taps were not two clicks: %r' % said
     if not last or last['vtable'] != AUDIO or last['cursor'] != volume:
         return None, 'after the two quick taps the page is %r, cursor %r' % (last and last['vtable'], last and last['cursor'])
-    if changed[volume]:
-        return None, 'the switch\'s Right changed %r to %r: the cursor moved while it was held' % (rows[volume], changed[volume])
-    if len(changed[switch]) != 1:
-        return None, 'the switch %r changed %r times' % (rows[switch], changed[switch])
-    rows[switch] = changed[switch][0]
+    # the rows as the last popup line lists them (a row's "now" line comes only while the cursor stays)
+    if changed[volume] or last['rows'][volume] != rows[volume]:
+        return None, 'the switch\'s Right changed %r to %r: the cursor moved while it was held' % (
+            rows[volume], changed[volume] or last['rows'][volume])
+    if last['rows'][switch] == rows[switch]:
+        return None, 'the switch %r did not change' % rows[switch]
+    rows[switch] = last['rows'][switch]
     return rows, None
 
 
@@ -186,6 +189,36 @@ def add_song(r, editor_log, moves, label):
     return log, None
 
 
+def quick_song(r, editor_log):
+    """ADD, then three taps right of the picker's line and one on its words faster than the presses go
+    out (review, finding 282): the song the picker showed when the words were tapped (the last
+    'picker shows' line before that click) must be the one the editor gets, and only it."""
+    before = r.popup(editor_log)
+    log = r.tap(pause.legend_tap(r.g.log(), 0x2000), 4)
+    picker = r.popup(log)
+    if not picker or not picker.get('picker'):
+        return None, 'ADD did not open the song picker'
+    x = picker['x'] + 20 if picker['left'] else picker['x']
+    y = (picker['y'] + 4) / 224 + 0.005
+    mark = len(r.g.log())
+    quick_taps(r.g, [(pause.view_x(488), y)] * 3 + [(pause.view_x(x), y)])
+    time.sleep(4)
+    log = r.g.log()[mark:]
+    head, cross, _ = re.split(r'(menu mouse: click at [^\n]*Cross[^\n]*)', log, maxsplit=1) if 'Cross' in log else (log, '', '')
+    seen = SHOWS.findall(r.g.log()[:mark] + head)
+    editor = r.popup(log)
+    said = re.findall(r'menu mouse: .*', log)
+    if not cross or not seen or not editor or editor['vtable'] != pause.EDITOR:
+        return None, 'the quick taps on ADD TRACK: %r, the editor %r' % (said, editor and editor['vtable'])
+    song = seen[-1][1].strip()
+    added = [t for t in editor['rows'].values() if t not in before['rows'].values()
+             and not re.search(r'end of list|add track', t, re.I)]
+    print('songs: quick: %s; shown at the click %r; added %r' % (said, song, added), flush=True)
+    if added != [song]:
+        return None, 'three quick taps right then one on %r added %r' % (song, added)
+    return log, None
+
+
 def songs(r, menu):
     log = r.tap(pause.row_tap(menu, pause.find_row(menu, 'MUSIC')), 4)
     page = r.popup(log)
@@ -216,6 +249,9 @@ def songs(r, menu):
         log, problem = add_song(r, log, moves, label)
         if problem:
             return problem
+    log, problem = quick_song(r, log)
+    if problem:
+        return problem
     return None
 
 
