@@ -107,29 +107,30 @@ const _: dhdr_version_fn = dhdr_version;
 pub unsafe extern "C" fn dhdr_device_init(d: *const DhdrDeviceDesc) -> i32 {
     const E: &str = "dhdr_device_init";
     let _g = Guard::enter(E);
+    // The descriptor first, even when the device exists: in the browser dhdr_web_init makes it
+    // before the core's first call, so a core built against another ABI is refused here too.
+    // SAFETY: C passes NULL or a DhdrDeviceDesc.
+    let Some(d) = (unsafe { d.as_ref() }) else {
+        log_err(E, "NULL descriptor");
+        crate::device::fail();
+        return 0;
+    };
+    if d.size as usize != std::mem::size_of::<DhdrDeviceDesc>() || d.abi != DHDR_ABI_VERSION {
+        log_err(E, &format!("descriptor size {} abi {}; this library is abi {} size {}", d.size, d.abi,
+                            DHDR_ABI_VERSION, std::mem::size_of::<DhdrDeviceDesc>()));
+        crate::device::fail();
+        return 0;
+    }
     if crate::device::gpu().is_some() {
         return 1;
     }
     #[cfg(target_arch = "wasm32")]
     {
         // The device is made by the async dhdr_web_init; this only reports it.
-        let _ = d;
         0
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // SAFETY: C passes NULL or a DhdrDeviceDesc.
-        let Some(d) = (unsafe { d.as_ref() }) else {
-            log_err(E, "NULL descriptor");
-            crate::device::fail();
-            return 0;
-        };
-        if d.size as usize != std::mem::size_of::<DhdrDeviceDesc>() || d.abi != DHDR_ABI_VERSION {
-            log_err(E, &format!("descriptor size {} abi {}; this library is abi {} size {}", d.size, d.abi,
-                                DHDR_ABI_VERSION, std::mem::size_of::<DhdrDeviceDesc>()));
-            crate::device::fail();
-            return 0;
-        }
         let dxc_path = if d.dxc_path.is_null() {
             None
         } else {

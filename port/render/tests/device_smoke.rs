@@ -112,6 +112,17 @@ fn exact_device_global_init() {
     assert!(device::init(&other));
     assert!(std::ptr::eq(device::gpu().unwrap(), g), "the same device");
     assert_eq!(g.options, o);
+    // C's entry checks the descriptor even when the device exists (the browser makes it before the
+    // core's first call, finding 284 review): another ABI or size is refused, this one reports it.
+    let desc = |abi: u32, size: u32| DhdrDeviceDesc { size, abi, flags: 0, vendor_id: 0, device_id: 0, log_level: 0,
+                                                       dxc_path: std::ptr::null(), window: std::ptr::null() };
+    let size = std::mem::size_of::<DhdrDeviceDesc>() as u32;
+    // SAFETY: valid descriptors.
+    unsafe {
+        assert_eq!(dhd_render::ffi::dhdr_device_init(&desc(DHDR_ABI_VERSION, size)), 1);
+        assert_eq!(dhd_render::ffi::dhdr_device_init(&desc(DHDR_ABI_VERSION - 1, size)), 0, "another ABI");
+        assert_eq!(dhd_render::ffi::dhdr_device_init(&desc(DHDR_ABI_VERSION, size - 8)), 0, "another size");
+    }
 }
 
 // ---------------------------------------------------------------- the native pipelines
