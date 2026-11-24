@@ -14,7 +14,8 @@ hidden desktop with touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no c
   touch where R1+R2 is sends nothing, L3 sends L3. The editor again: RESET, DONE: touch_edits empty,
   and the next start hides nothing.
 - pictures: the default Classic layout in the editor alone, either hand, on the Mi 11i's shape (its
-  cutout band on the right, a 5.2 mm top strip) and on a 20:9 screen with no cutout.
+  cutout band on the right, a 5.2 mm top strip), on a 20:9 screen with no cutout and on a 16:9 one (an
+  iPhone SE: the bar in two rows, L1+L2 beyond its column).
 
 The touch log (DHD_TOUCH_LOG=1) says where each control is and what each touch sent. Pictures in
 OUT/<scenario>. Exit 0 when every scenario passes."""
@@ -204,7 +205,8 @@ def hide(exe, out):
 
 # (name, screen mm, strips l,t,r,b, cutout x0,x1, window)
 SHAPES = [('phone-20x9', '154.5x69.5', None, None, (1600, 720)),
-          ('mi11i-cutout', '154.4x69.6', '0,5.2,0,0', '149.3,154.4', (1600, 721))]
+          ('mi11i-cutout', '154.4x69.6', '0,5.2,0,0', '149.3,154.4', (1600, 721)),
+          ('iphone-se-16x9', '104x58.5', None, None, (1600, 900))]
 
 
 def pictures(exe, out):

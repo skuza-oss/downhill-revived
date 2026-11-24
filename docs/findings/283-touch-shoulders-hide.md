@@ -34,6 +34,7 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
 - [x] 2026-11-24: the host's `touch: controls` and `touch: editor bar` lines, the desktop's cutout
   and strips for checks, `touch_layout_check.py`, PLAYING.md and TESTING.md
 - [x] 2026-11-24: the checks on the built game (Result)
+- [x] 2026-11-24: the review's six points (Review), each fixed with a unit test
 
 ## Decisions
 
@@ -54,10 +55,22 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
   trick never changes under a rolling thumb; another press needs a new touch. ✕'s roll onto ◻ / ○
   stays as it was (finding 141).
 - **Migration**: `classic.lbar` / `classic.rbar` entries (dx, dy, size) become the three buttons'
-  entries: each moved by the bar's dx, dy, and sized by the bar's size about the group's middle (its
-  offset from the middle at the reference scale times size - 1), so a bar made larger keeps its
-  buttons apart. A button's own entry wins, before or after the bar's. Out-of-range bars are dropped
-  as any entry; "thumb.lbar" is nothing. The text written back names the buttons, never the bars.
+  entries: each moved by the bar's dx, dy and given the bar's size. A bar made larger also spreads the
+  centres about the group's middle (the offset from the middle at the reference scale times 1.15 x
+  (size - 1): 1.15 covers a tablet at Size 105, whose buttons grow 1.34 times where the places grow
+  1.31), so the grown buttons stay apart; a smaller bar keeps the default spacing (pulling the centres
+  in too stacked the three at a small Size setting: the review). A button's own entry wins, before or
+  after the bar's. Out-of-range bars are dropped as any entry; "thumb.lbar" is nothing. The text
+  written back names the buttons, never the bars.
+- **Narrow screens**: the groups hang from opposite corners, so on a 16:9 phone (104 x 58.5 mm) the
+  default L1+L2 and R1+R2 overlapped by about 10 x 2 mm. Where a tenth smaller would part their touch
+  areas by GAP_MM, Classic is made that much smaller (an iPad mini at Size 105: 1.31 to 1.26);
+  past that, L1+L2 goes to the far side of its L1 / L2 column (`combo_out`; on the SE its top stays
+  below the speedometer's corner) and a width limit keeps the column's touch areas GAP_MM from R1+R2's
+  (an iPhone 8 Plus shape at Size 105: 1.05 to 1.03). Shrinking alone would have cost the SE a
+  further eighth (0.87 to 0.76). A moved L1+L2's move across is stored mirrored, as the left hand's
+  are (`edit_sx`), so a drag follows the finger and a migrated bar's spread takes it away from the
+  column.
 - **Saved visibility**: `TouchEdit.hidden`, saved as `preset.control=dx,dy,size,hide`. Older builds
   read the three numbers and skip the rest (they show the control). A hidden control counts as edited
   (the `layout=2` mark). It travels with the edits: UNDO and REDO, the steering rescue, RESET (all
@@ -69,11 +82,20 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
 - **Ghosts**: in HIDE mode hidden controls draw at 28 % of their alpha; a tap (down and up on the
   control's touch area) hides or shows; nothing is dragged or resized in HIDE mode (- and + dim).
   Outside HIDE mode the editor shows the layout as the race does: hidden controls neither show nor
-  move. A hidden control is no obstacle in the editor (its room is free); shown again over another it
-  may overlap, as a layout another rule bent may, and the player moves it.
+  move. A hidden control is no obstacle in the editor (its room is free); a ghost shows again only
+  where it fits (`control_fits`, the drop's rule); where another control has taken its room it stays a
+  ghost, with a double buzz, until that one moves (the review: L1 at 130 % shown over Pause took
+  Pause's taps). The dimmed - and + do nothing in HIDE mode. A hint about a hidden control waits,
+  unseen (PEDAL hidden: no "HOLD PEDAL TO PEDAL"); the tap attacks' hint needs ◻ or ○ shown.
 - **The editor's bar**: nine buttons now, 1.5 mm apart (2 before), GROUND 12, AIR 9, - 9, + 9, UNDO
   10, REDO 10, HIDE 10, RESET 11, DONE 10 mm, their words fitted to them. Classic on an iPhone with its
-  island on the action side has 104 mm beside the top buttons; the bar takes 102.5.
+  island on the action side has 104 mm beside the top buttons; the bar takes 102.5. Every arrangement
+  keeps to the usable width (the gesture strips and a cutout's band left out). Too narrow for one row
+  beside the top buttons (a 16:9 phone), it takes two on their wide side: GROUND .. REDO, then HIDE
+  RESET DONE next to the top buttons and the readout beyond (its words fitted to it), a little
+  narrower (down to 3/4) on a 4-inch phone with a cutout; the old one row across (138 mm) put GROUND
+  and DONE off a 104 mm screen. The second row lies over the shoulders there; each stays partly
+  uncovered to grab. `touch_editor_button` gives a bar button's box (the tests).
 - **The log**: the host writes `touch: controls name x,y ...` (hidden ones `name hidden`) when it
   lays the controls out, and the editor alone `touch: editor bar ...`; the checks aim with them.
   `DHD_TOUCH_STRIPS_MM` and `DHD_TOUCH_CUTOUT_MM` give the desktop a phone's strips and cutout.
@@ -87,6 +109,17 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
 - Between L1 and L2 (3.2 mm apart) the touch areas (20 % larger) leave a 1.9 mm strip that is
   neither's; a touch there starts the steering (Classic's steering area is below the L group's
   default places, so only after a move).
+
+## Review (2026-11-24)
+
+Six points, each checked in the code, fixed in its own commit with a unit test that fails without it:
+a migrated bar under 100 % stacked its buttons (`test_bar_migration_sizes`); a ghost shown over Pause
+took its taps (`test_editor_show_refused`); the bar's one-row fallback put DONE off a 104 mm screen
+(`test_editor_bar_small`: six small shapes, with and without a cutout or a strip, the top buttons
+uncovered); the default L1+L2 and R1+R2 overlapped on a 16:9 phone (`test_shoulders_narrow`: eight
+shapes, Size 70-105, both hands, a drag of the moved L1+L2); - and + sized in HIDE mode
+(`test_editor_hide_no_size`); a hidden PEDAL's hint showed and was marked seen
+(`test_hints_skip_hidden`).
 
 ## Result
 

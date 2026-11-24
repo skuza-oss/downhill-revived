@@ -113,14 +113,16 @@ What works today:
     the way where it did. **UNDO** and **REDO** step through your last changes (each drag, each
     run of - or +, RESET, each hide); **HIDE** hides buttons you don't use: while it is lit,
     tap a button to hide it (as many as you like), and hidden ones show as faint ghosts you tap
-    to bring back; tap HIDE again to finish. A hidden button is not drawn and takes no touch in
-    the race. Pause and the steering stick can't be hidden (the + spots go with ✕ or the face
+    to bring back (where another button has taken its place meanwhile, it stays hidden until you
+    move that one); tap HIDE again to finish. A hidden button is not drawn, takes no touch in the
+    race and gets no tip. Pause and the steering stick can't be hidden (the + spots go with ✕ or the face
     button beside them). **RESET** puts the layout back to its default, every hidden button
     shown again; **DONE** (or Back) saves, hidden buttons too. GROUND and AIR switch between the
     race layout and Thumb zones' trick stick. The launcher's **Edit the touch layout** opens the
     same editor.
   - **Classic pad's shoulders** are six buttons: L1 above L2 by the left edge with L1+L2 beside
-    them, R1 above R2 left of the face buttons with R1+R2 beside them (Hand: Left mirrors them).
+    them, R1 above R2 left of the face buttons with R1+R2 beside them (Hand: Left mirrors them;
+    on a narrow 16:9 phone L1+L2 sits on the other side of L1 and L2, so it stays clear of R1+R2).
     Each is its own button in Edit Layout: move, size or hide it on its own. A button keeps what
     it pressed until you lift your thumb (sliding from L1 onto L2 still holds L1, as on the old
     combined bar); lift and touch again for another. A layout saved with the old bars loads with
