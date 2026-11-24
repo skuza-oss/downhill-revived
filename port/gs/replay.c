@@ -92,7 +92,7 @@ int main(int argc, char **argv)
     if (argc != 3) { fprintf(stderr, "Usage: replay.exe capture.gs output-prefix\n"); return 1; }
     input = fopen(argv[1], "rb"); if (!input) { perror(argv[1]); return 1; }
     gs_reset(&gs); freeze();
-    if (!gs_gpu_init(&gs)) return 1;  /* the GPU (DXGI's first adapter, gpu_rust.c) */
+    if (!gs_gpu_init(&gs, NULL)) return 1;  /* the GPU (DXGI's first adapter, gpu_rust.c) */
     char vram_name[1024];
     if (getenv("DHD_GS_REPLAY_VRAM")) {
         snprintf(vram_name, sizeof vram_name, "%s-vram.txt", argv[2]);

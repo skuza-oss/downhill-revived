@@ -10,9 +10,13 @@
    dead zone, the button symbols, unlock all, FPS & Ping, the Performance group (Graphics:
    Performance Mode, a preset for the three effects after it, finding 183) and Native VU
    (above that group; findings 194, 198) apply at once; resolution,
-   widescreen, the texture pack, the font, the frame rate and V-Sync at the next start ("*" and
-   the row's hint, a line above the legend, say so). A setting the environment sets (DHD_*) is
-   shown but can't be changed here.
+   widescreen, the texture pack, the font, the frame rate, V-Sync and the graphics API at the next
+   start ("*" and the row's hint, a line above the legend, say so). Graphics API (Direct3D 12 or
+   Vulkan, finding 284) is on the Display tab (Graphics has no room for an eleventh row) and only
+   where the host says which API runs (DHD_GRAPHICS_API_RUNNING: Windows' gpu_rust.c). Its choice
+   is the one saved (DHD_WGPU_BACKEND), kept apart from the API that runs: a Vulkan that could not
+   start shows "Vulkan *" (Direct3D 12 runs), its hint says why, and Undo puts the saved choice back.
+   A setting the environment sets (DHD_*) is shown but can't be changed here.
    Nothing here writes game state: the page lives in host memory and the settings in dhd.ini,
    never in the memory card's save.
    A host that can do only some of the rows says which in DHD_PC_SETTINGS_ROWS, a comma list of
@@ -63,7 +67,7 @@ void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 void port_unlock_refresh(void);       /* patches_unlock.py: the lobby's rider statues follow Unlock All */
 
-enum { ROWS = 27, MAX_CHOICES = 16 };
+enum { ROWS = 28, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -77,7 +81,7 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
-       VSYNC, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES, LAUNCHER,
+       VSYNC, GRAPHICS_API, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES, LAUNCHER,
        BRIGHTNESS, CONTRAST, SATURATION, GAMMA };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
@@ -94,6 +98,7 @@ static Row rows[ROWS] = {
     {"Font:", "font", 0},  /* port/gs/font_sharp.c */
     {"Frame Rate:", "fps", 0},
     {"V-Sync:", "vsync", 0},  /* no tearing (port/gs/gpu_rust.c) */
+    {"Graphics API:", "graphics_api", 0},  /* Direct3D 12 or Vulkan, Windows only (port/gs/gpu_rust.c) */
     {"FPS & Ping:", "perf_counter", 1},
     {"Unlock All:", "unlock_all", 1},
     {"Player Names:", "names", 1},
@@ -163,6 +168,7 @@ void port_fx_haze(int on)
 }
 
 static int loaded;
+static int api_fell_back;  /* Vulkan was asked for at the start and Direct3D 12 runs (Graphics API's hint) */
 
 /* The largest scale the renderer draws on this GPU: DHD_SCALE_MAX, which the Rust native renderer
    sets (8, or less on a GPU with little memory or small textures); 0 without it (the exact
@@ -235,7 +241,7 @@ enum { TAB_DISPLAY, TAB_GRAPHICS, TAB_CONTROLS, TAB_ONLINE, TAB_GAME, TABS };
 static const char *const tab_labels[TABS] = {"Display", "Graphics", "Controls", "Online", "Game"};
 static const int row_tab[ROWS] = {TAB_GRAPHICS, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_CONTROLS, TAB_CONTROLS, TAB_GRAPHICS, TAB_GRAPHICS,
-    TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE, TAB_GRAPHICS, TAB_GRAPHICS, TAB_GRAPHICS,
+    TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE, TAB_GRAPHICS, TAB_GRAPHICS, TAB_GRAPHICS,
     TAB_GRAPHICS, TAB_GRAPHICS, TAB_GAME,
     TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY};  /* the picture rows: their screen, from Display */
 static int tab, visible[ROWS], tabs[TABS], tab_count;
@@ -266,6 +272,8 @@ static void choose_rows(void)
     }
     visible[PERFORMANCE] = visible[SHADOWS] || visible[FLARE] || visible[PARTICLES];
     visible[LAUNCHER] = list && rows[LAUNCHER].env && listed(list, rows[LAUNCHER].env);
+    const char *api = host_getenv("DHD_GRAPHICS_API_RUNNING");
+    if (!api || !*api) visible[GRAPHICS_API] = 0;   /* one API on this platform */
     const char *touch = host_getenv("DHD_TOUCH");
     int controls = !list || listed(list, "DHD_KEYBOARD") || (touch && *touch);
     tab_count = settings_tabs_choose(tabs, TABS, row_tab, visible, ROWS, TAB_CONTROLS, controls);
@@ -282,6 +290,11 @@ static void current(const Row *r, char *out, size_t size)
     if (r == &rows[PERFORMANCE]) {
         int state = perf_state();
         snprintf(out, size, "%s", state < 0 ? "Custom" : state ? "1" : "0");
+        return;
+    }
+    if (r == &rows[GRAPHICS_API]) {   /* the API that runs, which a Vulkan that could not start makes Direct3D 12 */
+        const char *v = host_getenv("DHD_GRAPHICS_API_RUNNING");
+        snprintf(out, size, "%s", v && *v ? v : r->builtin);
         return;
     }
     if (r == &rows[SIZE]) {
@@ -515,9 +528,12 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     if (r && locked(r)) {
         snprintf(hint, sizeof hint, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
         p->hint = hint;
-    } else if (r && r->selected != r->running) p->hint = restart_hint;
+    } else if (r == &rows[GRAPHICS_API] && api_fell_back && r->selected != r->running)
+        p->hint = "Vulkan did not start here: dhd.log says why";
+    else if (r && r->selected != r->running) p->hint = restart_hint;
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->hint = "No pack: see texture_pack in dhd.ini";
     else if (r == &rows[PERFORMANCE]) p->hint = "ON: the three effects below off, for speed";
+    else if (r == &rows[GRAPHICS_API]) p->hint = "Try Vulkan if the picture or speed is wrong";
     else if (r == &rows[SHADOWS]) p->hint = "The riders' shadows and the glow around the sun";
     else if (r == &rows[FLARE]) p->hint = "The rings across the picture from the sun";
     else if (r == &rows[PARTICLES]) p->hint = "Dust, dirt, spray and heat haze";
@@ -701,6 +717,14 @@ void port_pc_settings(void)
             current(&rows[i], value, sizeof value);
             rows[i].selected = rows[i].running = find(&rows[i], value);
         }
+        /* Graphics API: running is the API that runs (current), selected the choice saved, which
+           Undo puts back; they differ after a Vulkan that could not start */
+        Row *api = &rows[GRAPHICS_API];
+        const char *asked = api->env ? host_getenv(api->env) : NULL;
+        int saved = find(api, asked && *asked ? asked : api->builtin);
+        if (saved >= 0) api->selected = saved;
+        api_fell_back = saved >= 0 && !strcmp(api->choices[saved].value, "vulkan") && api->running >= 0 &&
+                        strcmp(api->choices[api->running].value, "vulkan");
         loaded = 1;
     }
     for (int i = 0; i < ROWS; i++) rows[i].opened = rows[i].selected;

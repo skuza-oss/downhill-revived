@@ -130,7 +130,7 @@ impl Surface {
     /// alive until dhdr_surface_destroy (present.c destroys the surface before the window, and on
     /// a phone drops it when the app goes to the background, before SDL releases the window).
     #[cfg(not(target_arch = "wasm32"))]
-    fn window(gpu: &Gpu, window: &DhdrWindow) -> Result<wgpu::Surface<'static>, String> {
+    pub(crate) fn window(gpu: &Gpu, window: &DhdrWindow) -> Result<wgpu::Surface<'static>, String> {
         use raw_window_handle::{RawDisplayHandle as D, RawWindowHandle as W};
         let target = match window.kind {
             // a = the CAMetalLayer of SDL's Metal view (SDL_Metal_GetLayer); wgpu has the variant where

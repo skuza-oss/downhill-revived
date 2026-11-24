@@ -1,8 +1,8 @@
 //! The touch controls' overlay (finding 141), drawn after the game picture in surface pixels,
 //! like the performance counter. C (port/hle/touch.c) lays the controls out in mm and hands over
-//! a list of shapes each picture (`dhdr_surface_touch`); here each is one instanced quad whose
-//! fragment shader draws it as a signed distance (discs with a two-tone rim, rings, rounded
-//! boxes, the trick stick's sectors, the PS2 symbols, chevrons, stripes, the action pictures of
+//! a list of shapes each picture (`dhdr_surface_touch`); here each is one instanced quad (its six
+//! corners a vertex buffer of their own, `CORNERS`) whose fragment shader draws it as a signed
+//! distance (discs with a two-tone rim, rings, rounded boxes, the trick stick's sectors, the PS2 symbols, chevrons, stripes, the action pictures of
 //! Button Style Actions) or as a character of the 8x8 font (`font8x8.rs`). The action pictures
 //! (finding 229) are signed distances too, generated from `touch_icons.txt` into
 //! `touch_icons.wgsl` by `port/tools/touch_icons.py`: no texture, sharp at any size. Nothing here
@@ -14,6 +14,12 @@ use super::font8x8;
 /// Floats per shape: kind, x, y, a, b, c, d, 0, fill rgba, line rgba (C's `dhdr_surface_touch`).
 pub const ITEM_FLOATS: usize = 16;
 const ITEM_BYTES: u64 = (ITEM_FLOATS * 4) as u64;
+
+/// A shape's quad, two triangles of a triangle list: its corners in half sizes (x right, y down).
+/// A vertex buffer, not a constant array the vertex shader indexes by its vertex index: PowerVR
+/// B-Series' Vulkan driver (BXM-8-256, 25.1) drew every shape of the array's quad as one triangle,
+/// the top edge whole and its lower corners at the bottom's middle (issue #119, finding 284).
+const CORNERS: [[f32; 2]; 6] = [[-1., -1.], [1., -1.], [-1., 1.], [-1., 1.], [1., -1.], [1., 1.]];
 
 #[derive(Default)]
 pub struct TouchOverlay {
@@ -40,6 +46,7 @@ struct Objects {
     uniforms: wgpu::Buffer,
     instances: wgpu::Buffer,
     capacity: u64,
+    corners: wgpu::Buffer,
     _font: wgpu::Texture,
 }
 
@@ -121,8 +128,9 @@ impl TouchOverlay {
         let Some(o) = self.objects.as_ref() else { return };
         pass.set_pipeline(&o.pipe);
         pass.set_bind_group(0, &o.group, &[]);
-        pass.set_vertex_buffer(0, o.instances.slice(..count as u64 * ITEM_BYTES));
-        pass.draw(0..6, 0..count);
+        pass.set_vertex_buffer(0, o.corners.slice(..));
+        pass.set_vertex_buffer(1, o.instances.slice(..count as u64 * ITEM_BYTES));
+        pass.draw(0..CORNERS.len() as u32, 0..count);
     }
 
     /// The overlay as the last draws of a pass already open on the w x h frame (the native
@@ -160,11 +168,13 @@ impl Objects {
         let _startup = crate::startup::step("touch overlay shader and pipeline");
         let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("touch overlay"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+        let corner = wgpu::vertex_attr_array![4 => Float32x2];
         let attributes = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
         let pipe = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("touch overlay"), layout: None,
             vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout { array_stride: ITEM_BYTES, step_mode: wgpu::VertexStepMode::Instance, attributes: &attributes }] },
+                buffers: &[wgpu::VertexBufferLayout { array_stride: 8, step_mode: wgpu::VertexStepMode::Vertex, attributes: &corner },
+                           wgpu::VertexBufferLayout { array_stride: ITEM_BYTES, step_mode: wgpu::VertexStepMode::Instance, attributes: &attributes }] },
             fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
             primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
@@ -195,7 +205,11 @@ impl Objects {
         let capacity = 256 * ITEM_BYTES;
         let instances = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("touch overlay shapes"), size: capacity,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        Self { pipe, group, uniforms, instances, capacity, _font: font }
+        let corners = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("touch overlay corners"), size: 8 * CORNERS.len() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let bytes: Vec<u8> = CORNERS.iter().flatten().flat_map(|f| f.to_le_bytes()).collect();
+        gpu.queue.write_buffer(&corners, 0, &bytes);
+        Self { pipe, group, uniforms, instances, capacity, corners, _font: font }
     }
 }
 
@@ -228,11 +242,11 @@ fn extent(kind: f32, a: f32, b: f32) -> vec2f {
     return vec2f(a, a);
 }
 
-@vertex fn vs(@builtin(vertex_index) i: u32, v: In) -> Out {
-    let corners = array<vec2f, 6>(vec2f(-1., -1.), vec2f(1., -1.), vec2f(-1., 1.), vec2f(-1., 1.), vec2f(1., -1.), vec2f(1., 1.));
+// corner: this vertex's corner of the quad (the CORNERS buffer)
+@vertex fn vs(@location(4) corner: vec2f, v: In) -> Out {
     let margin = 2.0 / min(screen.per_mm.x, screen.per_mm.y) + 0.4;   // room for the rims and the edge's blend
     let half = extent(v.p0.x, v.p0.w, v.p1.x) + vec2f(margin, margin);
-    let local = corners[i] * half;
+    let local = corner * half;
     let mm = v.p0.yz + local;
     let px = mm * screen.per_mm;
     var o: Out;

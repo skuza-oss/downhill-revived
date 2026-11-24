@@ -107,6 +107,49 @@ mod tests {
         }
     }
 
+    /// The vertex entry points in `module` that index an array of their own (a `let` or `var` array,
+    /// a constant, not a buffer) by a value known only when it runs, with the array's root.
+    fn vertex_local_array_indexing(module: &naga::Module) -> Vec<String> {
+        use naga::Expression as E;
+        let mut found = Vec::new();
+        for ep in module.entry_points.iter().filter(|ep| ep.stage == naga::ShaderStage::Vertex) {
+            let f = &ep.function;
+            for (_, e) in f.expressions.iter() {
+                let E::Access { base, .. } = *e else { continue };
+                let mut root = base;
+                loop {
+                    match f.expressions[root] {
+                        E::Access { base, .. } | E::AccessIndex { base, .. } => root = base,
+                        E::Load { pointer } => root = pointer,
+                        _ => break,
+                    }
+                }
+                if !matches!(f.expressions[root], E::GlobalVariable(_)) {
+                    found.push(format!("{}: {:?}", ep.name, f.expressions[root]));
+                }
+            }
+        }
+        found
+    }
+
+    /// No vertex shader takes a value from an array of its own by an index known only when it runs
+    /// (`corners[vertex_index]`): PowerVR B-Series' Vulkan driver (BXM-8-256, 25.1) drew the touch
+    /// overlay's quads made that way as single triangles (issue #119, finding 284). Corners come
+    /// from a vertex buffer, or from the vertex index's bits as present.wgsl does.
+    #[test]
+    fn no_vertex_local_array_indexing() {
+        for (name, source) in modules() {
+            let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
+            let found = vertex_local_array_indexing(&module);
+            assert!(found.is_empty(), "{name}: a vertex shader indexes an array of its own: {found:?}");
+        }
+        // the check finds the overlay's old vertex shader
+        let old = "@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+            let corners = array<vec2f, 6>(vec2f(-1., -1.), vec2f(1., -1.), vec2f(-1., 1.), vec2f(-1., 1.), vec2f(1., -1.), vec2f(1., 1.));
+            return vec4f(corners[i], 0., 1.); }";
+        assert_eq!(vertex_local_array_indexing(&naga::front::wgsl::parse_str(old).unwrap()).len(), 1);
+    }
+
     /// The check above catches a vertex shader that reads a texture.
     #[test]
     fn vertex_texture_reads_are_found() {

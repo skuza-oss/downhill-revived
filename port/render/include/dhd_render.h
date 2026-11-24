@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define DHDR_ABI_VERSION 4u
+#define DHDR_ABI_VERSION 5u
 
 #if defined(__wasm__)
 #define DHDR_FN(name) __attribute__((import_module("dhd_render"), import_name(#name)))
@@ -48,11 +48,12 @@ void dhd_host_log(const char *line, size_t bytes);
 enum { DHDR_DEV_VULKAN = 1, DHDR_DEV_FXC = 2, DHDR_DEV_DEBUG = 4, DHDR_DEV_VALIDATION = 8,
        DHDR_DEV_FALLBACK = 16, DHDR_DEV_NO_DUAL_SOURCE = 32, DHDR_DEV_DUAL_SOURCE = 64 };
 enum { DHDR_LOG_ERROR = 1, DHDR_LOG_WARN = 2, DHDR_LOG_INFO = 3 };
-enum { DHDR_FEAT_DUAL_SOURCE = 1, DHDR_FEAT_RENDER_PIPELINES = 2 };
+enum { DHDR_FEAT_DUAL_SOURCE = 1, DHDR_FEAT_RENDER_PIPELINES = 2, DHDR_FEAT_VULKAN = 4 };
 typedef struct DhdrDeviceDesc {
     uint32_t size;                   /* sizeof(DhdrDeviceDesc) */
     uint32_t abi;                    /* DHDR_ABI_VERSION; init fails (logged) on another size or abi */
-    uint32_t flags;                  /* DHDR_DEV_*: DHD_WGPU_BACKEND=vulkan, DHD_WGPU_COMPILER=fxc,
+    uint32_t flags;                  /* DHDR_DEV_*: DHD_WGPU_BACKEND=vulkan (graphics_api; Windows:
+                                        Direct3D 12 when Vulkan can't start), DHD_WGPU_COMPILER=fxc,
                                         DHD_WGPU_DEBUG (DEBUG | VALIDATION), WARP adapter (FALLBACK),
                                         DHD_WGPU_DUAL_SOURCE=0 (NO_DUAL_SOURCE), =1 (DUAL_SOURCE:
                                         used on Intel GPUs too, where it is off by default,
@@ -60,6 +61,8 @@ typedef struct DhdrDeviceDesc {
     uint32_t vendor_id, device_id;   /* PCI ids of the presentation adapter; 0, 0: high performance */
     uint32_t log_level;              /* DHDR_LOG_*: the most verbose wgpu/naga level forwarded */
     const char *dxc_path;            /* UTF-8 path of dxcompiler.dll beside the exe, or NULL (FXC) */
+    const struct DhdrWindow *window; /* the game's window (below), or NULL: on Windows a Vulkan device
+                                        that cannot present there is replaced by Direct3D 12's */
 } DhdrDeviceDesc;
 /* 1: the device exists (later calls return 1 at once, whatever d holds); 0: failed (logged), and
    every later call returns 0 too. Native: blocks until the device exists. Browser: the device is
@@ -70,7 +73,8 @@ DHDR_FN(dhdr_device_init)     int dhdr_device_init(const DhdrDeviceDesc *d);
 DHDR_FN(dhdr_adapter_name)    const char *dhdr_adapter_name(void);
 /* DHDR_FEAT_*: DUAL_SOURCE = dual-source blending used (offered, not refused by the flags, not an
    Intel GPU unless forced; Rust's device::dual_source);
-   RENDER_PIPELINES = a probe render pipeline was built. 0 before init. */
+   RENDER_PIPELINES = a probe render pipeline was built; VULKAN = the device runs on Vulkan (on
+   Windows a Vulkan asked for that could not start runs on Direct3D 12, finding 284). 0 before init. */
 DHDR_FN(dhdr_device_features) uint32_t dhdr_device_features(void);
 /* "dhd_render 1.0 wgpu 29.0.3 core 29.0.3 naga 29.0.3", NUL-terminated, static. */
 DHDR_FN(dhdr_version)         const char *dhdr_version(void);

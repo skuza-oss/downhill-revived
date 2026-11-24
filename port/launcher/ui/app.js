@@ -22,6 +22,8 @@ const has = (cap) => caps.has(cap);
 const TABS = [
   ['graphics', [
     { key: 'scale', label: 'row.scale', hint: () => scaleHint(), type: 'select', option: (v, t) => scaleOption(v, t), allow: (v) => scaleOffered(v) },
+    // Direct3D 12 or Vulkan (issue #129): Windows only, where the launcher reports `graphics-api`
+    { key: 'graphics_api', label: 'row.graphicsApi', hint: 'row.graphicsApi.hint', type: 'select', needs: 'graphics-api' },
     { key: 'DHD_ASPECT', label: 'row.aspect', hint: () => (has('touch-settings') ? 'row.aspect.hintTouch' : 'row.aspect.hint'), type: 'seg' },
     { key: 'DHD_PRESENT_FILTER', label: 'row.scaling', hint: 'row.scaling.hint', type: 'seg', needs: 'pc-settings' },
     { key: 'widescreen', label: 'row.widescreen', hint: 'row.widescreen.hint', type: 'switch', needs: 'touch-settings' },
@@ -51,6 +53,9 @@ const TABS = [
     { key: 'touch_preset', label: 'row.touchPreset', hint: 'row.touchPreset.hint', type: 'seg', needs: 'touch-settings' },
     { key: 'touch_hand', label: 'row.touchHand', hint: 'row.touchHand.hint', type: 'seg', needs: 'touch-settings' },
     { key: 'touch_steer', label: 'row.touchSteer', hint: 'row.touchSteer.hint', type: 'seg', needs: 'touch-settings' },
+    // the steering stick (issue #127): dimmed while the D-pad steers, as the game's TOUCH CONTROLS page dims it
+    { key: 'touch_stick', label: 'row.touchStick', hint: 'row.touchStick.hint', type: 'seg', needs: 'touch-settings',
+      when: () => get('touch_steer') !== 'dpad', offHint: 'row.touchStick.off' },
     { key: 'touch_size', label: 'row.touchSize', hint: 'row.touchSize.hint', type: 'select', needs: 'touch-settings' },
     { key: 'touch_style', label: 'row.touchStyle', hint: 'row.touchStyle.hint', type: 'seg', needs: 'touch-settings' },
     { label: 'row.touchEdit', hint: 'row.touchEdit.hint', type: 'action', button: 'row.touchEdit.button', icon: 'i-pencil',
@@ -373,8 +378,8 @@ function control(row, off) {
     case 'seg':
       return el('div', { class: 'seg', role: 'radiogroup', 'aria-label': name },
         offered().map(([v, text]) => el('button', {
-          class: v === value ? 'on' : '', role: 'radio', 'aria-checked': String(v === value), tabindex: tab,
-          onclick: () => save(row.key, v, label(text)).then(renderRows),
+          class: v === value ? 'on' : '', role: 'radio', 'aria-checked': String(v === value), tabindex: tab, disabled: off,
+          onclick: () => !off && save(row.key, v, label(text)).then(renderRows),  // a dimmed row never saves
         }, text)));
     case 'select': {
       const show = row.option || ((v, text) => text);

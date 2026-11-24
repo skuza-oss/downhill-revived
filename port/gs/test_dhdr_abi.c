@@ -12,7 +12,7 @@
 #define ROWS \
     S(DhdrDeviceDesc) F(DhdrDeviceDesc, size) F(DhdrDeviceDesc, abi) F(DhdrDeviceDesc, flags) \
         F(DhdrDeviceDesc, vendor_id) F(DhdrDeviceDesc, device_id) F(DhdrDeviceDesc, log_level) \
-        F(DhdrDeviceDesc, dxc_path) \
+        F(DhdrDeviceDesc, dxc_path) F(DhdrDeviceDesc, window) \
     S(DhdrExactStats) F(DhdrExactStats, submits) F(DhdrExactStats, reads) F(DhdrExactStats, read_ticks) \
         F(DhdrExactStats, dispatches) F(DhdrExactStats, bytes_written) F(DhdrExactStats, copies) \
     S(DhdrWindow) F(DhdrWindow, kind) F(DhdrWindow, reserved) F(DhdrWindow, a) F(DhdrWindow, b) \
@@ -52,7 +52,7 @@
     C(DHDR_DEV_VULKAN) C(DHDR_DEV_FXC) C(DHDR_DEV_DEBUG) C(DHDR_DEV_VALIDATION) C(DHDR_DEV_FALLBACK) \
     C(DHDR_DEV_NO_DUAL_SOURCE) C(DHDR_DEV_DUAL_SOURCE) \
     C(DHDR_LOG_ERROR) C(DHDR_LOG_WARN) C(DHDR_LOG_INFO) \
-    C(DHDR_FEAT_DUAL_SOURCE) C(DHDR_FEAT_RENDER_PIPELINES) \
+    C(DHDR_FEAT_DUAL_SOURCE) C(DHDR_FEAT_RENDER_PIPELINES) C(DHDR_FEAT_VULKAN) \
     C(DHDR_B_VRAM) C(DHDR_B_SNAPSHOT) C(DHDR_B_STATES) C(DHDR_B_PRIMITIVES) C(DHDR_B_BINS) C(DHDR_B_DISPLAY) \
     C(DHDR_B_COPY) C(DHDR_B_READBACK) C(DHDR_B_STAGED) C(DHDR_B_BATCHES) C(DHDR_B_UPLOAD) C(DHDR_B_COUNT) \
     C(DHDR_P_LOCAL_COPY) C(DHDR_P_SCANOUT) \

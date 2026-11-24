@@ -284,25 +284,41 @@ static int dxgi_adapter(unsigned vendor, unsigned id, DXGI_ADAPTER_DESC1 *desc, 
 }
 #endif
 
-/* The device's settings as DhdrDeviceDesc flags: DHD_WGPU_BACKEND=vulkan (Windows; elsewhere the
-   platform's one API), DHD_WGPU_DEBUG, DHD_WGPU_DUAL_SOURCE=0 (never) or =1 (on Intel GPUs too;
+/* The device's settings as DhdrDeviceDesc flags: DHD_WGPU_BACKEND=vulkan (dhd.ini's graphics_api;
+   Windows; elsewhere the platform's one API: a Vulkan that can't start runs on Direct3D 12 and the
+   log says why, finding 284; any other value is Direct3D 12), DHD_WGPU_DEBUG, DHD_WGPU_DUAL_SOURCE=0 (never) or =1 (on Intel GPUs too;
    the rule itself is Rust's device::dual_source, finding 188); on Windows DHD_WGPU_COMPILER=fxc
    (else DXC when dxcompiler.dll is beside the exe) and the adapter: DHD_WGPU_ADAPTER=fallback
    (WARP), else DXGI's first adapter by its PCI ids (the GPU the D3D11 presentation device took
    before), WARP when that is Microsoft's Basic Render Driver (no graphics driver); with no DXGI
    adapter, or another DHD_WGPU_ADAPTER value, wgpu's high-performance choice (WARP last).
-   Elsewhere wgpu's high-performance adapter.
+   Elsewhere wgpu's high-performance adapter. On Windows DHD_GRAPHICS_API_RUNNING then says which
+   API runs (dx12 or vulkan), for REVIVED SETTINGS' Graphics API row (pc_settings.c).
+   window (NULL in tools and tests) is the game's: a Vulkan device on Windows must present there,
+   else Direct3D 12 runs (Rust's device::init).
    Once the device exists later calls return 1 at once; a failure is latched by dhdr_device_init. */
-static int device_init(void)
+static int device_init(const GsWindow *window)
 {
     if (device.made) return 1;
     DhdrDeviceDesc d;
     memset(&d, 0, sizeof d);
     d.size = sizeof d;
     d.abi = DHDR_ABI_VERSION;
+    DhdrWindow w;
+    memset(&w, 0, sizeof w);
+    if (window && window->a) {
+        w.kind = window->kind;
+        w.a = window->a;
+        w.b = window->b;
+        d.window = &w;
+    }
     const char *backend = getenv("DHD_WGPU_BACKEND"), *compiler = getenv("DHD_WGPU_COMPILER");
     const char *choice = getenv("DHD_WGPU_ADAPTER"), *dual = getenv("DHD_WGPU_DUAL_SOURCE");
     if (backend && !strcmp(backend, "vulkan")) d.flags |= DHDR_DEV_VULKAN;
+#ifdef _WIN32
+    else if (backend && *backend && strcmp(backend, "dx12"))
+        fprintf(stderr, "gs: DHD_WGPU_BACKEND=%s is neither dx12 nor vulkan: Direct3D 12\n", backend);
+#endif
     if (getenv("DHD_WGPU_DEBUG")) d.flags |= DHDR_DEV_DEBUG | DHDR_DEV_VALIDATION;
     if (dual) d.flags |= atoi(dual) ? DHDR_DEV_DUAL_SOURCE : DHDR_DEV_NO_DUAL_SOURCE;
     d.log_level = getenv("DHD_WGPU_DEBUG") ? DHDR_LOG_WARN : DHDR_LOG_ERROR;
@@ -342,7 +358,12 @@ static int device_init(void)
 #endif
     if (!dhdr_device_init(&d)) return 0;
     device.made = 1;
+    if (!(dhdr_device_features() & DHDR_FEAT_VULKAN)) d.flags &= ~(uint32_t)DHDR_DEV_VULKAN;  /* Vulkan did not start */
     device.flags = d.flags;
+#ifdef _WIN32
+    void host_putenv_s(const char *name, const char *value);  /* port/host */
+    host_putenv_s("DHD_GRAPHICS_API_RUNNING", d.flags & DHDR_DEV_VULKAN ? "vulkan" : "dx12");
+#endif
 #ifdef _WIN32
     /* the adapter's PCI ids as far as they are known here: DXGI's first adapter (asked for by its
        ids), WARP's for the fallback adapter, else unknown (the high-performance adapter) */
@@ -559,11 +580,11 @@ int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned heigh
     return 1;
 }
 
-int gs_gpu_init(Gs *g)
+int gs_gpu_init(Gs *g, const GsWindow *window)
 {
     const char *render = getenv("DHD_RENDER");
     int native = render && !strcmp(render, "native");
-    if (!device_init()) return 0;
+    if (!device_init(window)) return 0;
     Rust *p = calloc(1, sizeof *p);
     if (!p) return 0;
     g->backend = p;

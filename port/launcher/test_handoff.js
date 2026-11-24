@@ -267,7 +267,45 @@ async function appHandlers() {
   }
 }
 
+// The rows a platform's caps give (finding 284): Graphics API on Windows' launcher only (cap
+// graphics-api), next to Resolution; Stick on a touch device's Touch tab, dimmed while the D-pad
+// steers, as the game's TOUCH CONTROLS page dims it.
+function capsRows() {
+  const page = pageWithApp(async () => new Promise(() => {}));
+  const rowsOf = (caps, tab) => JSON.parse(vm.runInContext(`caps = new Set(${JSON.stringify(caps)});
+    JSON.stringify((TABS.find(([k]) => k === '${tab}') || [0, []])[1].filter((r) => !r.needs || has(r.needs)).map((r) => r.key || r.label))`, page));
+  const windows = ['window', 'pc-settings', 'graphics-api'];
+  assert.deepStrictEqual(rowsOf(windows, 'graphics').slice(0, 2), ['scale', 'graphics_api'], 'Windows: Graphics API after Resolution');
+  for (const caps of [['window', 'pc-settings'], ['touch-settings']]) {
+    assert.ok(!rowsOf(caps, 'graphics').includes('graphics_api'), `no Graphics API with ${caps}`);
+  }
+  const touch = rowsOf(['touch-settings'], 'touch');
+  assert.deepStrictEqual(touch.slice(0, 4), ['touch_preset', 'touch_hand', 'touch_steer', 'touch_stick'], 'Stick after Steer With');
+  assert.ok(!rowsOf(windows, 'touch').includes('touch_stick'), 'no Touch rows on a PC');
+  const alive = (steer) => vm.runInContext(`state.settings = { touch_steer: '${steer}' };
+    TABS.find(([k]) => k === 'touch')[1].find((r) => r.key === 'touch_stick').when()`, page);
+  assert.strictEqual(alive('stick'), true);
+  assert.strictEqual(alive('tilt'), true);
+  assert.strictEqual(alive('dpad'), false, 'dimmed while the D-pad steers');
+  // a dimmed segmented row's buttons are disabled and save nothing, even when one is activated
+  // (a focused option the redraw put the focus back on); alive, they save
+  vm.runInContext(`globalThis.saved = [];
+    save = async (key, value) => { saved.push(key + '=' + value); };
+    state.schema = { touch_stick: { choices: [['floating', 'Floating'], ['fixed', 'Fixed']] } };
+    state.settings = { touch_steer: 'dpad', touch_stick: 'floating' };
+    globalThis.fakeEl = (tag) => ({ tag, attrs: {}, on: {}, kids: [], setAttribute(k, v) { this.attrs[k] = v; },
+      addEventListener(k, f) { this.on[k] = f; }, append(k) { this.kids.push(k); } });
+    document = { createElement: fakeEl, createElementNS: (ns, tag) => fakeEl(tag) };`, page);
+  const press = (off) => vm.runInContext(`(() => { saved = [];
+    const seg = control(TABS.find(([k]) => k === 'touch')[1].find((r) => r.key === 'touch_stick'), ${off});
+    for (const b of seg.kids) b.on.click();
+    return JSON.stringify({ disabled: seg.kids.map((b) => 'disabled' in b.attrs), saved }); })()`, page);
+  assert.deepStrictEqual(JSON.parse(press(true)), { disabled: [true, true], saved: [] }, 'a dimmed Stick row saves nothing');
+  assert.deepStrictEqual(JSON.parse(press(false)), { disabled: [false, false], saved: ['touch_stick=floating', 'touch_stick=fixed'] });
+}
+
 (async () => {
+  capsRows();
   await gateAlone();
   await tauri();
   await android();

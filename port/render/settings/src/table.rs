@@ -107,6 +107,11 @@ pub const SETTINGS: &[Setting] = &[
     choice("saturation", "DHD_SATURATION", PERCENTS, "100", "100"),
     choice("gamma", "DHD_GAMMA", GAMMAS, "1.0", "1.0"),
     Setting { other: "exact", ..choice("renderer", "DHD_RENDER", &[c("native", "Native"), c("exact", "Exact")], "native", "exact") },
+    // The graphics API on Windows (issue #129, finding 284): Direct3D 12 or Vulkan, the same renderer on
+    // either, at the next start. A Vulkan that cannot start falls back to Direct3D 12 with a dhd.log
+    // line (port/render/src/device.rs). Other platforms have one API each and ignore it. Another
+    // value stands for Direct3D 12, as port/gs/gpu_rust.c reads it.
+    Setting { other: "dx12", ..choice("graphics_api", "DHD_WGPU_BACKEND", &[c("dx12", "Direct3D 12"), c("vulkan", "Vulkan")], "dx12", "dx12") },
     switch("skip_movies", "DHD_SKIP_MOVIES", SWITCH, "1", "0"),
     switch("vibration", "DHD_VIBRATION", SWITCH, "1", "1"),
     // The sticks' dead zone (finding 134, port/hle/stick.h): game = the game's own (about 36%, as the
