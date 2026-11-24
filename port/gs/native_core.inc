@@ -456,13 +456,17 @@ static int native_page_origin(const NativeSurface *s, unsigned page, int *x, int
     return 1;
 }
 
-/* Leaves at once: the exit report would wait on the render thread. */
-static void native_oom(const char *what)
+/* Leaves at once: the exit report would wait on the render thread. Before that one line with the
+   bytes asked (0: not known), the renderer's totals and the process's memory (finding 281). */
+static void native_oom_size(const char *what, size_t bytes)
 {
     fprintf(stderr, "gs native: out of memory (%s)\n", what);
     fflush(stderr);
+    dhdr_memory_report(what, (uint64_t)bytes);
     native_exit_now(1);
 }
+
+static void native_oom(const char *what) { native_oom_size(what, 0); }
 
 static NativeCommand *native_command(Native *n)
 {
@@ -470,7 +474,7 @@ static NativeCommand *native_command(Native *n)
     if (f->command_count == f->command_capacity) {
         unsigned capacity = f->command_capacity ? f->command_capacity * 2 : 4096;
         NativeCommand *grown = realloc(f->commands, capacity * sizeof *grown);
-        if (!grown) native_oom("commands");
+        if (!grown) native_oom_size("commands", (size_t)capacity * sizeof *grown);
         f->commands = grown; f->command_capacity = capacity;
     }
     NativeCommand *c = &f->commands[f->command_count++];
@@ -1079,7 +1083,7 @@ static void native_reserve(NativeFrame *f, unsigned more)
     unsigned capacity = f->vertex_capacity ? f->vertex_capacity * 2 : 1 << 16;
     while (capacity < f->vertex_count + more) capacity *= 2;
     NativeVertex *grown = realloc(f->vertices, capacity * sizeof *grown);
-    if (!grown) native_oom("vertices");
+    if (!grown) native_oom_size("vertices", (size_t)capacity * sizeof *grown);
     f->vertices = grown; f->vertex_capacity = capacity;
 }
 
@@ -1089,7 +1093,7 @@ static void native_reserve_indices(NativeFrame *f, unsigned more)
     unsigned capacity = f->index_capacity ? f->index_capacity * 2 : 1 << 16;
     while (capacity < f->index_count + more) capacity *= 2;
     uint32_t *grown = realloc(f->indices, capacity * sizeof *grown);
-    if (!grown) native_oom("indices");
+    if (!grown) native_oom_size("indices", (size_t)capacity * sizeof *grown);
     f->indices = grown; f->index_capacity = capacity;
 }
 

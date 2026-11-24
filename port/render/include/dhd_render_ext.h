@@ -5,7 +5,8 @@
 
    SP10 (docs/findings/090-speed.md): an indexed native picture. Finding 109: the device's largest
    texture. Finding 129: the perf: lines' GPU counters. Finding 171: a lost device. Finding 194:
-   whether translated VU1 meshes can be drawn. Finding 256: the pipeline list. Finding 275: the picture settings. */
+   whether translated VU1 meshes can be drawn. Finding 256: the pipeline list. Finding 275: the picture settings.
+   Finding 281: the out-of-memory line. */
 #ifndef DHD_RENDER_EXT_H
 #define DHD_RENDER_EXT_H
 
@@ -42,6 +43,11 @@ DHDR_FN(dhdr_perf_read) uint32_t dhdr_perf_read(uint64_t *out, uint32_t count);
    DHD_GPU_DRED=1). C asks after a present failed and then ends the game with a message. Any
    thread; the browser's device always answers 0 (it has its own lost handling). */
 DHDR_FN(dhdr_device_lost) int dhdr_device_lost(void);
+
+/* Finding 281: logs one line for an allocation that failed: `what` (a short name), the bytes
+   asked (0: not known), the renderer's textures, surfaces and arenas, and on Apple the process's
+   memory footprint, what iOS still allows it and its free address space. Any thread; no lock. */
+DHDR_FN(dhdr_memory_report) void dhdr_memory_report(const char *what, uint64_t asked);
 
 /* Finding 194 (Native VU): 1 while the native renderer can draw translated VU1 meshes, 0 once it
    can't (a mesh pipeline the driver refused;

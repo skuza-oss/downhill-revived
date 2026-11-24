@@ -223,6 +223,7 @@ impl Arenas {
         self.uploads.used = 0;
         self.reversed.clear();
         self.reversed_base = vertex_count;
+        self.publish();
         Ok(())
     }
 
@@ -253,6 +254,7 @@ impl Arenas {
         self.reversed_indices.try_reserve_exact(n)
             .map_err(|_| "gs native: out of memory (reversed indices)".to_string())?;
         self.index_base = index_count;
+        self.publish();
         Ok(())
     }
 
@@ -385,6 +387,7 @@ impl Arenas {
             }));
         }
         self.draws.used = 0;
+        self.publish();
         Ok(())
     }
 
@@ -428,6 +431,15 @@ impl Arenas {
     /// Bytes of the vertex buffer.
     pub fn vertex_capacity(&self) -> u64 {
         self.vertex_capacity
+    }
+
+    /// The GPU buffers in the renderer's totals (`crate::memory`, finding 281): constants, uploads,
+    /// draw constants, vertices, indices.
+    fn publish(&self) {
+        let sizes = [self.uniforms.buffer_size, self.uploads.buffer_size, self.draws.buffer_size, self.vertex_capacity,
+                     self.index_capacity];
+        let made = sizes.iter().filter(|&&b| b != 0).count() as u64;
+        crate::memory::set(crate::memory::Part::Arenas, made, sizes.iter().sum());
     }
 
     pub fn stats(&self) -> ArenaStats {

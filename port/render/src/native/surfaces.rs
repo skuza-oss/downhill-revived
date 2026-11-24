@@ -389,6 +389,23 @@ impl Surfaces {
         }
     }
 
+    /// The surfaces' textures (the grown ones' old textures and the scratch too) in the renderer's
+    /// totals (`crate::memory`, finding 281): RGBA8 and depth32float are 4 bytes a pixel.
+    fn publish(&self) {
+        let px = |s: [u32; 2]| s[0] as u64 * s[1] as u64 * 4;
+        let live = self.list.iter().filter(|s| s.texture.is_some());
+        let (mut count, mut bytes) = live.fold((0u64, 0u64), |(c, b), s| (c + 1, b + px(s.size)));
+        for g in &self.grows {
+            count += 1;
+            bytes += px(g.size);
+        }
+        if self.scratch.is_some() {
+            count += 1;
+            bytes += px(self.scratch_size);
+        }
+        crate::memory::set(crate::memory::Part::Surfaces, count, bytes);
+    }
+
     /// Surface `index`, or None past the last.
     pub fn get(&self, index: usize) -> Option<&Surface> {
         self.list.get(index)
@@ -438,6 +455,7 @@ impl Surfaces {
                 self.grows.push(Grow { index, texture, view, size: old_size, depth });
             }
         }
+        self.publish();
         Ok([w, h])
     }
 
@@ -459,6 +477,7 @@ impl Surfaces {
                 kit.encoder.copy_texture_to_texture(at(&g.texture, 0, 0), at(texture, 0, 0), extent(g.size[0], g.size[1]));
             }
         }
+        self.publish();
         Ok(())
     }
 
@@ -490,6 +509,7 @@ impl Surfaces {
                 let group = texture_group(kit.gpu, kit.texture_layout, kit.nearest, &view);
                 self.scratch = Some(Scratch { texture, view, group });
                 self.scratch_size = [w, h];
+                self.publish();
                 true
             }
             Err(e) => {
@@ -714,6 +734,7 @@ impl Surfaces {
             *s = Surface::default();
             self.grows.retain(|g| g.index != index);
         }
+        self.publish();
     }
 
     /// Surface `index`'s contents set to `bytes` (its size, rows unpadded: RGBA8, or for a Z

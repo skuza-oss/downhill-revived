@@ -43,6 +43,9 @@ pub fn note(reason: wgpu::DeviceLostReason, message: &str) {
         crate::loss_context::report();
         crate::host::log(&format!("gs: the GPU device was lost ({reason:?}): {}",
                                   if message.is_empty() { "no message" } else { message }));
+        if message.to_ascii_lowercase().contains("out of memory") {
+            crate::memory::failed("the GPU device", 0);   // finding 281
+        }
     }
 }
 
