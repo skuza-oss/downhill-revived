@@ -2848,6 +2848,29 @@ static void tilt_step(Touch *t)
     else t->tilt_mix = fmaxf(want, t->tilt_mix - step);
 }
 
+/* The control a hint rings (draw_hint), -1 none. */
+static int hint_control(const Touch *t, int hint)
+{
+    switch (hint) {
+    case TOUCH_HINT_PEDAL: case TOUCH_HINT_SPRINT: return TC_PEDAL;
+    case TOUCH_HINT_ATTACK: return t->set.attacks == TOUCH_ATTACK_FLICK ? TC_PEDAL : TC_SQUARE;
+    case TOUCH_HINT_HOP: return TC_HOP;
+    case TOUCH_HINT_SLIDE: return TC_SLIDE;
+    case TOUCH_HINT_TRICK: return TC_TRICK;
+    default: return -1;
+    }
+}
+
+/* A hint about a control the player hid (finding 283) waits, unseen: it would tell them to press
+   nothing. The tap attacks' hint names ◻ or ○: either one shown will do. */
+static int hint_usable(const Touch *t, int hint)
+{
+    int c = hint_control(t, hint);
+    if (c < 0 || !touch_hideable(c)) return 1;
+    if (c == TC_SQUARE) return (t->ctl[TC_SQUARE].on && !t->ctl[TC_SQUARE].hidden) || (t->ctl[TC_CIRCLE].on && !t->ctl[TC_CIRCLE].hidden);
+    return t->ctl[c].on && !t->ctl[c].hidden;
+}
+
 static void hints_step(Touch *t)
 {
     const TouchGame *g = &t->game;
@@ -2864,6 +2887,8 @@ static void hints_step(Touch *t)
         if (t->hint == TOUCH_HINT_HOP && race - t->last_hop_race < 1000) t->hint = 0;
         return;
     }
+    for (int h = 1; h <= TOUCH_HINT_TRICK; h <<= 1)   /* a hidden control's hint: as if seen, this race only */
+        if (!hint_usable(t, h)) shown |= (unsigned)h;
     if (!(shown & TOUCH_HINT_PEDAL) && g->clock_moving && race < 4000) SHOW(TOUCH_HINT_PEDAL, 4000 - race);
     else if (!(shown & TOUCH_HINT_ATTACK) && race >= 20000 && race < 25000) SHOW(TOUCH_HINT_ATTACK, 4000);
     else if (!(shown & TOUCH_HINT_HOP) && g->clock_moving && race - t->last_hop_race >= 10000) SHOW(TOUCH_HINT_HOP, 6000);

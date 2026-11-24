@@ -3554,6 +3554,28 @@ static void test_editor_hide_no_size(void)
     CHECK(text[0] == 0);
 }
 
+/* The review of finding 283: PEDAL hidden in Thumb zones, fresh hints: the race's start shows no
+   "HOLD PEDAL TO PEDAL" and marks it not seen, nor the flick attack's (PEDAL's too); HOP's, a shown
+   control's, still comes. */
+static void test_hints_skip_hidden(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    TouchSettings s = *touch_settings(t);
+    s.hints_shown = 0;
+    touch_layout_parse(&s, "thumb.layout=2;thumb.pedal=0.0,0.0,1.00,hide");
+    touch_configure(t, &s, &PHONE);
+    TouchSettings saved;
+    touch_take_saved(t, &saved);
+    game.race_ms = 500;
+    fields(10);
+    CHECK(!(touch_take_saved(t, &saved) & TOUCH_SAVED_HINTS));
+    CHECK(!(touch_settings(t)->hints_shown & TOUCH_HINT_PEDAL));
+    game.race_ms = 21000;   /* the attack hint's window, and 10 s without a hop */
+    fields(10);
+    CHECK(touch_take_saved(t, &saved) & TOUCH_SAVED_HINTS);
+    CHECK(saved.hints_shown == TOUCH_HINT_HOP);
+}
+
 /* The editor alone (the launcher's "Edit the touch layout") has the same bar: HIDE there too. */
 static void test_editor_alone_hide(void)
 {
@@ -3629,6 +3651,7 @@ int main(void)
     test_editor_hide();
     test_editor_show_refused();
     test_editor_hide_no_size();
+    test_hints_skip_hidden();
     test_editor_alone_hide();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
