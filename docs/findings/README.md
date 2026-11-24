@@ -306,6 +306,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 278 | [a PowerVR B-Series phone loses the GPU device in the menus](278-powervr-bxm-device-lost.md) | current |  |
 | 280 | [input latency (issue #123): where a press waits, and what of it is ours](280-input-latency.md) | current |  |
 | 281 | [an iPhone with 3 GB closes "out of memory" from the native renderer (0.8.12)](281-ios-renderer-memory.md) | current |  |
+| 282 | [touch: AUDIO / OTHER's rows (issue #125) and the custom playlist's songs (issue #118)](282-touch-menu-taps.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
