@@ -5,7 +5,9 @@ desktop with touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no controll
 
 - audio: the front end's OPTIONS > AUDIO / OTHER by a tap; a tap on each row's words: a switch (Vibration,
   Stereo Sound) changes, a volume is chosen and keeps its value, and the page stays open after every
-  tap. Then the legend's SELECT keeps the values and closes it.
+  tap. Then a tap on Vibration and, while its Right is still held, one on Music Volume: Vibration
+  changes once, Music Volume keeps its value (the cursor waits for the press). Then the legend's
+  SELECT keeps the values and closes it.
 - pause: a single race (touch_pause_check's menu script), Pause, MORE; OPTIONS: each row as above; the
   legend's BACK. MUSIC PLAYLIST: its list chosen by the picker's arrows and words (CUSTOM), USER 1,
   MODIFY, then three songs added from ADD TRACK, a one-row picker: the first song shown (top), the
@@ -67,6 +69,43 @@ def value_rows(r, page, to_x, label):
     return rows, None
 
 
+def quick_taps(g, points, gap=0.022):
+    """Taps one after another faster than a press lasts (6 fields): each a posted move, down and up,
+    a field or two apart so each is its own tap."""
+    width, height = g.client()
+    for fx, fy in points:
+        lp = (int(fy * height) & 0xFFFF) << 16 | (int(fx * width) & 0xFFFF)
+        g.post(0x0200, 0, lp); time.sleep(0.003)
+        g.post(0x0201, 1, lp); time.sleep(0.003)
+        g.post(0x0202, 0, lp); time.sleep(gap)
+
+
+def switch_then_volume(r, page, rows, to_x, label):
+    """A tap on Vibration and, while its Right is still held, a tap on Music Volume (review, finding
+    282): the switch changes once, the volume keeps its value, the cursor ends on the volume."""
+    switch = next(k for k, t in rows.items() if not re.search(r'\d\s*$', t))
+    volume = next(k for k, t in rows.items() if re.search(r'\d\s*$', t))
+    mark = len(r.g.log())
+    quick_taps(r.g, [row_at(page, switch, to_x), row_at(page, volume, to_x)])
+    time.sleep(3)
+    log = r.g.log()[mark:]
+    said = re.findall(r'menu mouse: .*', log)
+    changed = {k: [t.strip() for t in re.findall(r'mouse trace: row %d now: (.*)' % k, log)] for k in (switch, volume)}
+    last = r.popup()
+    print('%s: %r then %r at once: %s; changed %r; cursor %r' % (label, rows[switch], rows[volume], said, changed,
+                                                                  last and last['cursor']), flush=True)
+    if len(re.findall(r'menu mouse: click', log)) != 2:
+        return None, 'the two quick taps were not two clicks: %r' % said
+    if not last or last['vtable'] != AUDIO or last['cursor'] != volume:
+        return None, 'after the two quick taps the page is %r, cursor %r' % (last and last['vtable'], last and last['cursor'])
+    if changed[volume]:
+        return None, 'the switch\'s Right changed %r to %r: the cursor moved while it was held' % (rows[volume], changed[volume])
+    if len(changed[switch]) != 1:
+        return None, 'the switch %r changed %r times' % (rows[switch], changed[switch])
+    rows[switch] = changed[switch][0]
+    return rows, None
+
+
 def audio(exe, out):
     g = hidden_game.Game(exe, out, env=touch.env_for(out, dict(DHD_NAV=left_right.OPTIONS_NAV, DHD_TOUCH_WITH_SCRIPT='1')),
                          name='touch-menu-taps-audio', shot_window=None)
@@ -80,6 +119,9 @@ def audio(exe, out):
         if not page or page['vtable'] != AUDIO:
             return 'AUDIO / OTHER did not open'
         rows, problem = value_rows(r, page, shell_x, 'audio')
+        if problem:
+            return problem
+        rows, problem = switch_then_volume(r, page, rows, shell_x, 'audio')
         if problem:
             return problem
         legend = re.findall(r'  legend button 4000: glyph (-?\d+)-(-?\d+), word to (-?\d+)', g.log())
@@ -201,7 +243,9 @@ def pause_run(exe, out):
         if not page or page['vtable'] != AUDIO:
             return 'OPTIONS in the pause menu is not AUDIO / OTHER: %r' % (page and page['vtable'])
         print('pause options rows: %s' % page['rows'], flush=True)
-        _, problem = value_rows(r, page, pause.view_x, 'pause-options')
+        rows, problem = value_rows(r, page, pause.view_x, 'pause-options')
+        if not problem:
+            _, problem = switch_then_volume(r, page, rows, pause.view_x, 'pause-options')
         if problem:
             return problem
         log = r.tap(pause.legend_tap(g.log(), 0x1000), 4)   # the legend's BACK

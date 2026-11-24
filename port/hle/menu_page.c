@@ -662,13 +662,49 @@ void menu_play(const char *sound)
 enum { PRESS_FIELDS = 3, QUEUE = 8 };
 static HostMouse seen_mouse;
 static int mouse_started;
-static uint16_t queue[QUEUE];
+/* A press can be bound to a popup and a cursor row (press_at, finding 282): when it comes to the
+   front of the queue its popup must still be the one open (else it is dropped) and the cursor is put
+   on its row then, not at the click. A value page reads a held Right on whatever row the cursor is on
+   (AUDIO / OTHER's volumes, func_0015E750), so its cursor may not move while a press is held. */
+typedef struct { uint16_t button; void *menu; int row; } Press;
+static Press queue[QUEUE];
 static int queued, press_field;  /* press_field: fields into the first press (held, then let go) */
+static void *hover_menu;          /* a value page's hover kept back while presses are queued */
+static int hover_row = -1;
 
-static void press(uint16_t button)
+static void *open_popup(void)
 {
-    if (queued < QUEUE) queue[queued++] = button;
+    return D_003F52D0[M_CLOSING] ? NULL : *(void **)(D_003F52D0 + M_MENU);
 }
+
+/* The press at the front starts: its popup gone, it is dropped (and the next one starts); its row,
+   the cursor goes there. A press of no button only moves the cursor. */
+static void press_start(void)
+{
+    while (queued) {
+        Press *q = &queue[0];
+        if (q->menu && q->menu != open_popup()) {
+            memmove(queue, queue + 1, (size_t)(queued - 1) * sizeof *queue);
+            queued--;
+            continue;
+        }
+        if (q->menu && q->row >= 0) AT(q->menu, X_CURSOR, int) = q->row;
+        if (q->button) return;
+        memmove(queue, queue + 1, (size_t)(queued - 1) * sizeof *queue);
+        queued--;
+    }
+}
+
+static void press_at(uint16_t button, void *menu, int row)
+{
+    if (queued >= QUEUE) return;
+    queue[queued++] = (Press){button, menu, row};
+    if (row >= 0) hover_menu = NULL, hover_row = -1;
+    press_field = queued == 1 ? 0 : press_field;
+    if (queued == 1) press_start();
+}
+
+static void press(uint16_t button) { press_at(button, NULL, -1); }
 
 /* The left presses so far (a running count: a new one is a click or a tap) and the pointer in the
    view's coordinates (-1 off the picture): for a screen outside the menus, the race's results
@@ -681,7 +717,7 @@ unsigned menu_mouse_clicks(int view, int *x, int *y)
 }
 
 /* The buttons the mouse holds on player 1's pad this field. */
-static uint16_t pressed_now(void) { return queued && press_field < PRESS_FIELDS ? queue[0] : 0; }
+static uint16_t pressed_now(void) { return queued && press_field < PRESS_FIELDS ? queue[0].button : 0; }
 
 void menu_mouse_merge(int player, HostPad *out)
 {
@@ -979,8 +1015,11 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
     }
     int value_row = p && row >= 0 && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE && p->arrows[row] != MENU_VALUE_ACTION;
     int editor = AT(menu, X_VTABLE, uint32_t) == MUSIC_EDITOR;   /* its cursor moves by taps only (below) */
-    if (moved && !editor && row >= 0 && !side && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
-        AT(menu, X_CURSOR, int) = row;
+    int values = !p && own_left_right(menu);
+    if (moved && !editor && row >= 0 && !side && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row) {
+        if (values && queued) hover_menu = menu, hover_row = row;   /* a held press reads the cursor's row */
+        else AT(menu, X_CURSOR, int) = row;
+    }
     /* a game's popup with no row to choose is a message waiting for Cross ("PRESS X TO CONTINUE",
        the unlocks, the memory card's notices): a tap anywhere answers it (issue #105, finding 266) */
     int message = !p && menu_is_message(&((Item *)((char *)menu + X_ITEMS))->enabled, AT(menu, X_COUNT, int), ITEM_SIZE);
@@ -998,23 +1037,22 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
                 : b == PAD_CIRCLE ? "Circle" : b == PAD_SQUARE ? "Square" : "nothing (the legend's row, off its words)");
         if (b) press((uint16_t)b);
     } else if (left && side) {
-        AT(menu, X_CURSOR, int) = row;
-        press(side);
+        press_at(side, menu, row);
     } else if (left && row >= 0 && row_enabled(menu, row) && editor && AT(menu, X_CURSOR, int) != row) {
         /* the playlist editor: Cross saves the list and leaves (func_0019B638), and its CHANGE and
            DELETE act on the cursor's song, so a tap on another row only takes the cursor there; a
            tap on the cursor's row is Cross (finding 274; a phone has no hover) */
         AT(menu, X_CURSOR, int) = row;
         hle_log("menu mouse: the playlist editor's cursor to row %d\n", row);
-    } else if (left && row >= 0 && row_enabled(menu, row) && !p && own_left_right(menu)) {
+    } else if (left && row >= 0 && row_enabled(menu, row) && values) {
         /* a value page's row (AUDIO / OTHER, finding 282): the cursor there, and a switch (Vibration,
            Stereo Sound, ...) its next value, the pad's Right; a row whose value is a number (a volume)
            is only chosen: its value goes by the taps beside it or the legend's LESS / MORE. The page's
            Cross (keep and close) is the legend's SELECT. */
-        AT(menu, X_CURSOR, int) = row;
         int number = menu_value_is_number(item_text((const Item *)((char *)menu + X_ITEMS) + row));
-        hle_log("menu mouse: a value row: %s\n", number ? "chosen (a number)" : "Right (its next value)");
-        if (!number) press(PAD_RIGHT);
+        hle_log("menu mouse: a value row: %s%s\n", number ? "chosen (a number)" : "Right (its next value)",
+                queued ? ", after the presses before it" : "");
+        press_at(number ? 0 : PAD_RIGHT, menu, row);
     } else if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);
@@ -1596,6 +1634,11 @@ void menu_mouse_field(void)
         memmove(queue, queue + 1, (size_t)(queued - 1) * sizeof *queue);
         queued--;
         press_field = 0;
+        press_start();
+    }
+    if (!queued && hover_menu) {  /* a value page's hover kept back: now the presses are done */
+        if (hover_menu == open_popup()) AT(hover_menu, X_CURSOR, int) = hover_row;
+        hover_menu = NULL, hover_row = -1;
     }
     HostMouse now;
     memset(&now, 0, sizeof now);
