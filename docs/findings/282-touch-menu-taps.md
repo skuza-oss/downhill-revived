@@ -25,6 +25,7 @@ traces equal to the base build's. Out of scope: gameplay, the pad and the keyboa
 - [x] 2026-11-24: both causes, on the code and in hidden runs (What was true); the fix (e0573986)
 - [x] 2026-11-24: `touch_menu_taps_check.py`, the existing touch checks, state traces, the checks
   (Result)
+- [x] 2026-11-24: review round, two fixes (Review: 172c5928, a895d83d)
 
 ## What was true
 
@@ -88,6 +89,23 @@ the tapped row unless the cursor is on the first.
 - A long song's words ("Melissa "Do You Wanna Fly?"") reach 150 view pixels right of the middle: a
   tap there is on the words (Cross), as it should be; the check taps near the view's edges.
 
+## Review
+
+A review of the branch found two races with the press queue (a press is held 3 fields and let go
+3, `menu_page.c` `press`), both real and both reproduced on the branch's build before the fixes by
+the check tool's new cases:
+
+1. AUDIO / OTHER reads a held Right on whatever row the cursor is on (`func_0015E750`), and a tap or
+   a hover moved the cursor at once: a tap on Vibration and, a field or two later, on Music Volume
+   gave Music Volume 50 → 51 and Vibration unchanged (front end and pause alike). Now a press can
+   carry its popup and row (`press_at`): the cursor goes to the row when the press starts, a press
+   whose popup closed is dropped, and on a value page a hover waits until the queue is empty.
+2. ADD TRACK: three quick taps right of the song and one on it: the queued Rights moved the picker
+   before the Cross went out (shown Stick It "Here We Go" at the tap, added Melissa "Do You Wanna
+   Fly?"). The picker's Cross now carries the row shown at the tap and puts the cursor back there
+   when it starts: the song added is always the one shown at the tap (the picker may show the
+   later songs for a few fields before it).
+
 ## Result
 
 Commits on `fix/touch-menu-taps`: the lane plan; the fix (`menu_page.c`, `menu_pads.c`
@@ -105,7 +123,10 @@ Commits on `fix/touch-menu-taps`: the lane plan; the fix (`menu_page.c`, `menu_p
   CUSTOM, USER 1, MODIFY, then ADD TRACK three times: the first song shown (1 Louder "In
   Traction", the reporter's own case, which the base build answered with Krush "Survive"), after five
   taps right of the line and one left (row 4, Goddess "You'll See"), and the last (row 22, The
-  Herbaliser "Time 2 Build"): each time the editor got the song shown and only it.
+  Herbaliser "Time 2 Build"): each time the editor got the song shown and only it. Since the
+  review also: a switch then a volume tapped about 26 ms apart (the switch changes, the volume keeps
+  its value, the cursor ends on the volume) in both scenarios, and three taps right of the song then
+  one on it as fast (the song shown at that tap is the one added).
 - Existing checks on this build: `touch_continue_check.py`, `touch_left_right_check.py`,
   `touch_pause_check.py`, `touch_legend_check.py`: PASS.
 - State traces: boot (600 fields) and race (5000) equal to the base build's (aded9f56, built here).
