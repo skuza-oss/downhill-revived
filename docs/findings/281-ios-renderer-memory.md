@@ -62,6 +62,12 @@ extended-virtual-addressing and increased-memory-limit entitlements (a paid acco
   with 8 GB or more 512, which the PC route never reaches (192 MiB at its busiest), so PCs draw as
   before. A failed texture create frees half and tries once more. `DHD_NATIVE_TEXTURE_MB` sets the
   budget for tests. The browser takes 256 MiB.
+- **After the review** (05dcb70a, 6418d107, 7f0149b6): a refused atlas is made again at half the
+  side, down to one page, and that size is kept (`DHD_NATIVE_ATLAS_PAGES` sets it for tests; the
+  transfers test's second run draws with 2 x 2 pages); a routine texture trim that cannot get under
+  3/4 of the budget holds further routine trims until the next field (else every miss scanned the
+  4096 slots for nothing); the error handler logs the memory line before a fatal wgpu
+  out-of-memory, outside `memory::failed`'s rate limit.
 
 ## Surprises
 
