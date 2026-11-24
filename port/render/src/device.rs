@@ -17,6 +17,9 @@
 //!   the game with a message, finding 171); `log::set_level(log_level)`.
 //! - `DHDR_FEAT_RENDER_PIPELINES`: present.wgsl's pipeline (an RGBA8 target) built inside a
 //!   Validation scope, as the probe.
+//! - Windows' Vulkan (graphics_api = vulkan, DHD_WGPU_BACKEND=vulkan) that cannot start (no driver,
+//!   no device, only a software adapter): the device is made on Direct3D 12 instead, with a dhd.log
+//!   line (`direct3d_instead`, finding 284); `DHDR_FEAT_VULKAN` says which one runs.
 //!
 //! The retired C path's device_init: `port/gs/gpu_wgpu.c:122-218`. The C side now is
 //! `port/gs/gpu_rust.c`'s device_init, which only turns the DHD_WGPU_* variables into flags.
@@ -87,6 +90,9 @@ impl Gpu {
         if render_pipelines {
             features |= DHDR_FEAT_RENDER_PIPELINES;
         }
+        if info.backend == wgpu::Backend::Vulkan {
+            features |= DHDR_FEAT_VULKAN;
+        }
         Gpu { instance, adapter, device, queue, info, name, features, options, shared: OnceLock::new() }
     }
 }
@@ -126,6 +132,13 @@ pub fn backends(o: &DeviceOptions) -> wgpu::Backends {
     } else {
         wgpu::Backends::VULKAN
     }
+}
+
+/// Windows' Vulkan, asked for, that could not start: the flags to make the device with on Direct3D
+/// 12 instead (the default), else None (finding 284). Elsewhere there is one API, nothing to fall
+/// back to.
+pub fn direct3d_instead(flags: u32) -> Option<u32> {
+    (cfg!(windows) && flags & DHDR_DEV_VULKAN != 0).then_some(flags & !DHDR_DEV_VULKAN)
 }
 
 /// Intel's PCI vendor id.
@@ -282,6 +295,11 @@ mod native {
         // The driver in the log, for bug reports: many draw faults are one driver's.
         crate::host::log(format!("gs: GPU {} on {:?}, driver {} {}", info.name, info.backend, info.driver,
                                  info.driver_info).trim_end());
+        // Vulkan chosen on Windows finds only a software adapter (no Vulkan driver for the GPU): not
+        // a start, Direct3D 12 runs on the GPU instead (`init`). WARP asked for (FALLBACK) stays.
+        if direct3d_instead(o.flags).is_some() && o.flags & DHDR_DEV_FALLBACK == 0 && software(&info) {
+            return Err(format!("only a software Vulkan adapter ({})", info.name));
+        }
         #[cfg(any(windows, target_os = "linux", target_os = "android"))]
         log_vulkan(&adapter);
         log_adapters(&instance, backends, &info);
@@ -411,7 +429,15 @@ pub fn init(o: &DeviceOptions) -> bool {
         return false;
     }
     crate::log::set_level(o.log_level);
-    match Gpu::create(o) {
+    let made = Gpu::create(o).or_else(|e| match direct3d_instead(o.flags) {
+        Some(flags) => {
+            crate::host::log(&format!("gs: Vulkan could not start ({e}); the game runs on Direct3D 12 instead \
+                                       (graphics_api in dhd.ini, or DHD_WGPU_BACKEND)"));
+            Gpu::create(&DeviceOptions { flags, ..o.clone() })
+        }
+        None => Err(e),
+    });
+    match made {
         Ok(g) => install(g),
         Err(e) => {
             crate::host::log(&format!("dhd_render: no device: {e}"));
@@ -529,6 +555,18 @@ mod tests {
 
     const NVIDIA: u32 = 0x10DE;
     const AMD: u32 = 0x1002;
+
+    /// Finding 284: only Windows' Vulkan falls back, to Direct3D 12 with the other flags kept.
+    #[test]
+    fn vulkan_falls_back_on_windows_only() {
+        let flags = DHDR_DEV_VULKAN | DHDR_DEV_FXC | DHDR_DEV_NO_DUAL_SOURCE;
+        let want = if cfg!(windows) { Some(DHDR_DEV_FXC | DHDR_DEV_NO_DUAL_SOURCE) } else { None };
+        assert_eq!(direct3d_instead(flags), want);
+        assert_eq!(direct3d_instead(DHDR_DEV_FXC), None, "Direct3D 12 has nothing to fall back to");
+        if cfg!(windows) {
+            assert_eq!(backends(&DeviceOptions { flags: want.unwrap(), ..Default::default() }), wgpu::Backends::DX12);
+        }
+    }
 
     /// The rule (finding 188): Intel off unless forced; DHD_WGPU_DUAL_SOURCE=0 refuses it on every
     /// GPU; nothing turns on what the adapter does not offer.

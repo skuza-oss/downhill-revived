@@ -128,11 +128,11 @@ fn sizes_the_header_documents() {
 
 #[test]
 fn constants() {
-    assert_eq!(DHDR_ABI_VERSION, 4);
+    assert_eq!(DHDR_ABI_VERSION, 5);
     assert_eq!([DHDR_DEV_VULKAN, DHDR_DEV_FXC, DHDR_DEV_DEBUG, DHDR_DEV_VALIDATION, DHDR_DEV_FALLBACK,
                 DHDR_DEV_NO_DUAL_SOURCE, DHDR_DEV_DUAL_SOURCE], [1, 2, 4, 8, 16, 32, 64]);
     assert_eq!([DHDR_LOG_ERROR, DHDR_LOG_WARN, DHDR_LOG_INFO], [1, 2, 3]);
-    assert_eq!([DHDR_FEAT_DUAL_SOURCE, DHDR_FEAT_RENDER_PIPELINES], [1, 2]);
+    assert_eq!([DHDR_FEAT_DUAL_SOURCE, DHDR_FEAT_RENDER_PIPELINES, DHDR_FEAT_VULKAN], [1, 2, 4]);
     assert_eq!([DHDR_B_VRAM, DHDR_B_SNAPSHOT, DHDR_B_STATES, DHDR_B_PRIMITIVES, DHDR_B_BINS, DHDR_B_DISPLAY,
                 DHDR_B_COPY, DHDR_B_READBACK, DHDR_B_STAGED, DHDR_B_BATCHES, DHDR_B_UPLOAD, DHDR_B_COUNT],
                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);

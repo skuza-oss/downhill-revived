@@ -84,6 +84,8 @@
   "row.scale.window.memory": "Die ans Fenster angepasste Auflösung lag zuletzt bei {used}x; der Speicher deiner Grafikkarte erlaubt bis zu {limit}x",
   "row.scale.window.texture": "Die ans Fenster angepasste Auflösung lag zuletzt bei {used}x; die größte Textur deiner Grafikkarte erlaubt bis zu {limit}x",
   "row.scale.hintPhone": "Wie scharf das 3D-Bild gezeichnet wird. 1x ist die Auflösung der PS2; höhere Stufen brauchen ein schnelleres Handy. Erkannte langsame Android-Handys starten mit Performance-Modus, die langsamsten mit 1x. Beides lässt sich hier ändern.",
+  "row.graphicsApi": "Graphics API",
+  "row.graphicsApi.hint": "Direct3D 12 passt für die meisten PCs; probier Vulkan, wenn Bild oder Tempo nicht stimmen. Startet Vulkan nicht, nimmt das Spiel Direct3D 12.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide passt zur Form deines Monitors; 16:9 bleibt immer 16:9",
   "row.aspect.hintTouch": "Wide passt zur Form deines Bildschirms; 16:9 bleibt immer 16:9",

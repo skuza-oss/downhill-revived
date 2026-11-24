@@ -82,6 +82,8 @@
   "row.scale.window.memory": "按窗口匹配的分辨率上次为 {used}x; 受你的显卡显存限制，最高支持 {limit}x",
   "row.scale.window.texture": "按窗口匹配的分辨率上次为 {used}x; 受你的显卡最大纹理尺寸限制，最高支持 {limit}x",
   "row.scale.hintPhone": "3D 画面的清晰程度。1x 与 PS2 相同；更高的倍数需要更快的手机。 已识别的低性能 Android 手机默认开启性能模式，最慢的机型使用 1x 分辨率。两项设置均可在此更改。",
+  "row.graphicsApi": "Graphics API",
+  "row.graphicsApi.hint": "大多数电脑适合 Direct3D 12；画面或速度不对时可以试试 Vulkan。Vulkan 无法启动时，游戏会改用 Direct3D 12。",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide 适配显示器的形状；16:9 始终为 16:9",
   "row.aspect.hintTouch": "Wide 适配屏幕的形状；16:9 始终为 16:9",

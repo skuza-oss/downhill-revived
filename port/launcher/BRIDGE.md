@@ -57,6 +57,7 @@ call, served in arrival order (`launcher_calls.h`, finding 227).
 |---|---|---|---|
 | `window` | draws its own title bar (minimize, close) | yes | |
 | `pc-settings` | shows the PC's settings rows (display, window size, V-Sync, texture pack, server, Discord) | yes | |
+| `graphics-api` | shows Graphics API (Direct3D 12 or Vulkan, setting `graphics_api`) on the Graphics tab | Windows | |
 | `bindings` | shows the Controls tab (keys and controller buttons, the stick picture) | yes | |
 | `server` | asks `server_status` and shows the race server's line | yes | |
 | `install-update` | installs a newer release itself (`install_update`) | yes | |

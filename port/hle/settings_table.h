@@ -20,6 +20,7 @@ static const SettingChoice setting_choices_contrast[] = {{"50", "50%"}, {"60", "
 static const SettingChoice setting_choices_saturation[] = {{"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}, {"110", "110%"}, {"120", "120%"}, {"130", "130%"}, {"140", "140%"}, {"150", "150%"}};
 static const SettingChoice setting_choices_gamma[] = {{"0.6", "0.6"}, {"0.7", "0.7"}, {"0.8", "0.8"}, {"0.9", "0.9"}, {"1.0", "1.0"}, {"1.1", "1.1"}, {"1.2", "1.2"}, {"1.3", "1.3"}, {"1.4", "1.4"}};
 static const SettingChoice setting_choices_renderer[] = {{"native", "Native"}, {"exact", "Exact"}};
+static const SettingChoice setting_choices_graphics_api[] = {{"dx12", "Direct3D 12"}, {"vulkan", "Vulkan"}};
 static const SettingChoice setting_choices_skip_movies[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_vibration[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_stick_dead_zone[] = {{"game", "Game (36%)"}, {"5", "5%"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}, {"40", "40%"}, {"50", "50%"}};
@@ -66,6 +67,7 @@ static const SettingInfo setting_table[] = {
     {"saturation", "DHD_SATURATION", "100", setting_choices_saturation, 11},
     {"gamma", "DHD_GAMMA", "1.0", setting_choices_gamma, 9},
     {"renderer", "DHD_RENDER", "exact", setting_choices_renderer, 2},
+    {"graphics_api", "DHD_WGPU_BACKEND", "dx12", setting_choices_graphics_api, 2},
     {"skip_movies", "DHD_SKIP_MOVIES", "0", setting_choices_skip_movies, 2},
     {"vibration", "DHD_VIBRATION", "1", setting_choices_vibration, 2},
     {"stick_dead_zone", "DHD_STICK_DEAD_ZONE", "game", setting_choices_stick_dead_zone, 9},

@@ -22,6 +22,8 @@ const has = (cap) => caps.has(cap);
 const TABS = [
   ['graphics', [
     { key: 'scale', label: 'row.scale', hint: () => scaleHint(), type: 'select', option: (v, t) => scaleOption(v, t), allow: (v) => scaleOffered(v) },
+    // Direct3D 12 or Vulkan (issue #129): Windows only, where the launcher reports `graphics-api`
+    { key: 'graphics_api', label: 'row.graphicsApi', hint: 'row.graphicsApi.hint', type: 'select', needs: 'graphics-api' },
     { key: 'DHD_ASPECT', label: 'row.aspect', hint: () => (has('touch-settings') ? 'row.aspect.hintTouch' : 'row.aspect.hint'), type: 'seg' },
     { key: 'DHD_PRESENT_FILTER', label: 'row.scaling', hint: 'row.scaling.hint', type: 'seg', needs: 'pc-settings' },
     { key: 'widescreen', label: 'row.widescreen', hint: 'row.widescreen.hint', type: 'switch', needs: 'touch-settings' },

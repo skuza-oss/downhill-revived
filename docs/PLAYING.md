@@ -14,7 +14,9 @@ What works today:
   your place, the career or the online room (never a private room's code). Off in the launcher:
   Online > Discord status.
 - **Native renderer** on Direct3D 12 or Vulkan, written in Rust on [wgpu](https://wgpu.rs). The
-  original PS2 graphics hardware is reproduced on the GPU. An exact emulation path stays in the
+  original PS2 graphics hardware is reproduced on the GPU. On Windows, Graphics API (the launcher's
+  Graphics tab, or REVIVED SETTINGS > Display) picks Direct3D 12 (the default) or Vulkan for the
+  next start; if Vulkan can't start, the game runs on Direct3D 12 and `dhd.log` says why. An exact emulation path stays in the
   code as the reference it is tested against.
 - **60 fps or more, with even frame pacing.** The game runs at its original 59.94 Hz, and each
   picture is shown on a fixed grid, so frames don't come out long-short-long. REVIVED SETTINGS > Frame
@@ -497,6 +499,7 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 |---|---|---|
 | `iso` | (asked at the first start) | your disc image |
 | `renderer` | `native` | `native`, or `exact` (the slow reference path) |
+| `graphics_api` | `dx12` | Windows: `dx12` (Direct3D 12) or `vulkan`; a Vulkan that can't start runs on Direct3D 12 (`dhd.log` says why). Other systems have one API and ignore it. The variable `DHD_WGPU_BACKEND` wins over it |
 | `scale` | `2` | the 3D picture's resolution, `1` to `8` times the PS2's, or `window` |
 | `window` | `borderless` | `windowed`, `borderless` or `fullscreen` |
 | `widescreen` | `1` | `1` the monitor's shape, `0` off, or a shape such as `21:9` |

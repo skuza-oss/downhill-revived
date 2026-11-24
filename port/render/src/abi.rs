@@ -16,7 +16,7 @@ use core::marker::{PhantomData, PhantomPinned};
 use core::mem::{align_of, offset_of, size_of};
 
 /// `DHDR_ABI_VERSION`: `DhdrDeviceDesc.abi` must carry it.
-pub const DHDR_ABI_VERSION: u32 = 4;
+pub const DHDR_ABI_VERSION: u32 = 5;
 
 // ---------------- device ----------------
 
@@ -35,6 +35,8 @@ pub const DHDR_LOG_INFO: u32 = 3;
 
 pub const DHDR_FEAT_DUAL_SOURCE: u32 = 1;
 pub const DHDR_FEAT_RENDER_PIPELINES: u32 = 2;
+/// The device runs on Vulkan (on Windows: asked for and started, finding 284).
+pub const DHDR_FEAT_VULKAN: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

@@ -37,7 +37,11 @@ struct App {
 
 /// What this launcher can do, for the page (port/launcher/BRIDGE.md, "Capabilities"; finding 225):
 /// a window with its own buttons, the PC's settings and bindings, the race server's status, updates
-/// it installs itself, patch notes, and a game it waits for (and may close).
+/// it installs itself, patch notes, and a game it waits for (and may close); on Windows also the
+/// choice of graphics API (Direct3D 12 or Vulkan, finding 284).
+#[cfg(windows)]
+const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-update", "patch-notes", "close-game", "graphics-api"];
+#[cfg(not(windows))]
 const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-update", "patch-notes", "close-game"];
 
 #[derive(Serialize)]
