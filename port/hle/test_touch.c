@@ -95,7 +95,8 @@ static void test_scaling(void)
     CHECK(fabsf(touch_height_scale(62.0f, TOUCH_THUMB_ZONES) - 0.8889f) < 0.001f);   /* 89% on a 62 mm screen */
     CHECK(fabsf(touch_button_scale(0.8889f) - 0.8667f) < 0.001f);                    /* buttons 87% */
     CHECK(fabsf(touch_button_scale(0.70f) - 0.64f) < 0.001f);                        /* Size 70%: buttons 64% */
-    CHECK(touch_height_scale(62.0f, TOUCH_CLASSIC) >= 1.0f);                         /* Classic needs only 62 mm */
+    CHECK(touch_height_scale(65.0f, TOUCH_CLASSIC) >= 1.0f);                         /* Classic needs 65 mm (62 with one shoulder bar a side, finding 283) */
+    CHECK(touch_height_scale(64.0f, TOUCH_CLASSIC) < 1.0f);
     start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
     float x, y, r;
     touch_control(t, TC_PEDAL, &x, &y, &r);
@@ -252,7 +253,7 @@ static void test_camera_step(void)
         CHECK(r.selects == 1 && !r.ups && r.steps == 1 && r.step_at == r.edge_at && r.edge_at > 5 && r.step_with_select);
         /* combined with another press: SELECT alone, no step (look back is SELECT + L2) */
         fields(40);
-        int other = classic ? TC_LBAR : TC_PEDAL;
+        int other = classic ? TC_L2 : TC_PEDAL;
         at(other, &ox, &oy);
         touch_down(t, 4, x, y, now);
         fields(3);
@@ -1198,8 +1199,8 @@ static void test_editor_bar(void)
             for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
                 float cx, cy, cr;
                 CHECK(touch_control(t, c, &cx, &cy, &cr));
-                static const float half_w[8] = {7, 5, 4.5f, 4.5f, 6, 6, 7, 7};   /* GROUND AIR - + UNDO REDO RESET DONE */
-                for (int b = 0; b < 8; b++) {
+                static const float half_w[9] = {6, 4.5f, 4.5f, 4.5f, 5, 5, 5, 5.5f, 5};   /* GROUND AIR - + UNDO REDO HIDE RESET DONE */
+                for (int b = 0; b < 9; b++) {
                     float bx, by;
                     CHECK(touch_target(t, TOUCH_TARGET_EDITOR, b, &bx, &by));
                     CHECK(fabsf(bx - cx) >= half_w[b] + cr || fabsf(by - cy) >= 4.5f + cr);   /* no overlap */
@@ -1228,7 +1229,7 @@ static void test_editor_bar(void)
             CHECK(hypotf(bx - px, by - py) >= br + pr - 0.01f);                 /* not over PEDAL / ✕ */
             CHECK(hypotf(bx - px, by - py) <= hypotf(nx - px, ny - py) + 0.01f);   /* no further than its start */
             float dx, dy;
-            touch_target(t, TOUCH_TARGET_EDITOR, 7, &dx, &dy);   /* DONE */
+            touch_target(t, TOUCH_TARGET_EDITOR, 8, &dx, &dy);   /* DONE */
             touch_down(t, 9, dx, dy, now);
             touch_up(t, 9, dx, dy, now);
             field();
@@ -1270,9 +1271,9 @@ static void test_classic_resume(void)
     wait_ms(520);
     CHECK(buttons() & PAD_CROSS);
     touch_up(t, 2, x, y, now);
-    /* the shoulder bar's middle presses both */
+    /* L1+L2 presses both */
     float bx, by, br;
-    touch_control(t, TC_LBAR, &bx, &by, &br);
+    touch_control(t, TC_L1L2, &bx, &by, &br);
     touch_down(t, 3, bx, by, now);
     field();
     CHECK((buttons() & (PAD_L1 | PAD_L2)) == (PAD_L1 | PAD_L2));
@@ -2196,7 +2197,7 @@ static void editor_tap(int b)
     field();
 }
 
-enum { E_GROUND, E_AIR, E_MINUS, E_PLUS, E_UNDO, E_REDO, E_RESET, E_DONE };
+enum { E_GROUND, E_AIR, E_MINUS, E_PLUS, E_UNDO, E_REDO, E_HIDE, E_RESET, E_DONE };
 
 static float size_of(int preset, int c) { return touch_settings(t)->edit[preset][c].size; }
 
@@ -2230,8 +2231,9 @@ static void check_layout_clear(float min_gap, float W, float H)
             if (!touch_control(t, d, &x2, &y2, NULL) || skip2) continue;
             touch_control_size(t, d, &hw2, &hh2);
             float gap = fmaxf(fabsf(x - x2) - hw - hw2, fabsf(y - y2) - hh - hh2);   /* boxes round both: a lower bound */
-            int round = hw == hh && hw2 == hh2 && c != TC_CAMERA && c != TC_PAUSE && c != TC_LBAR && c != TC_RBAR &&
-                        d != TC_CAMERA && d != TC_PAUSE && d != TC_LBAR && d != TC_RBAR;
+            int box_c = c == TC_CAMERA || c == TC_PAUSE || (c >= TC_L1 && c <= TC_R1R2);
+            int box_d = d == TC_CAMERA || d == TC_PAUSE || (d >= TC_L1 && d <= TC_R1R2);
+            int round = hw == hh && hw2 == hh2 && !box_c && !box_d;
             if (round) gap = hypotf(x - x2, y - y2) - hw - hw2;
             if (gap < min_gap) fprintf(stderr, "test_touch: controls %d and %d %.2f mm apart on %.0f x %.0f\n", c, d, gap, W, H);
             CHECK(gap >= min_gap);
@@ -2437,6 +2439,44 @@ static void test_phone_defaults(void)
                 }
 }
 
+/* Finding 283: the editor's bar, HIDE added, still clear of the top buttons on the phones of
+   test_phone_defaults (the iPhone with its island on the action side has the least room), every
+   preset and hand, the buttons in the bar apart. */
+static void test_editor_bar_phones(void)
+{
+    static const TouchScreen screens[3] = {
+        {153.6f, 70.7f, 0, 0, 0, 3.2f, 0, 0, 9.9f, 70.7f},
+        {153.6f, 70.7f, 0, 0, 0, 3.2f, 143.7f, 0, 153.6f, 70.7f},
+        {154.4f, 69.6f, 0, 5.2f, 0, 0, 149.3f, 0, 154.4f, 69.6f},
+    };
+    static const float half_w[9] = {6, 4.5f, 4.5f, 4.5f, 5, 5, 5, 5.5f, 5};
+    for (int i = 0; i < 3; i++)
+        for (int preset = 0; preset < 2; preset++)
+            for (int left = 0; left < 2; left++) {
+                start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+                TouchSettings s = *touch_settings(t);
+                s.left_handed = left;
+                touch_configure(t, &s, &screens[i]);
+                touch_open_editor(t);
+                field();
+                float bx[9], by[9];
+                for (int b = 0; b < 9; b++) CHECK(touch_target(t, TOUCH_TARGET_EDITOR, b, &bx[b], &by[b]));
+                for (int b = 0; b < 9; b++) {
+                    CHECK(bx[b] - half_w[b] >= 0 && bx[b] + half_w[b] <= screens[i].width);
+                    for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
+                        float cx, cy, hw, hh;
+                        touch_control(t, c, &cx, &cy, NULL);
+                        touch_control_size(t, c, &hw, &hh);
+                        int clear = fabsf(bx[b] - cx) >= half_w[b] + hw || fabsf(by[b] - cy) >= 4.0f + hh;
+                        if (!clear) fprintf(stderr, "test_touch: editor button %d over control %d (screen %d, preset %d, left %d)\n", b, c, i, preset, left);
+                        CHECK(clear);
+                    }
+                    for (int d = b + 1; d < 9; d++)
+                        CHECK(fabsf(bx[b] - bx[d]) >= half_w[b] + half_w[d] + 1.0f || fabsf(by[b] - by[d]) >= 8.0f);   /* 1.5 mm apart at least */
+                }
+            }
+}
+
 /* touch_edits as 0.8.0 wrote them (its touch_layout_format: "%.1f,%.1f,%.2f", sizes 0.60-1.60):
    they load as they were and lay out on 0.8.0's places, on a phone and on a tablet. */
 static void test_old_edits(void)
@@ -2617,9 +2657,9 @@ static int dpad_works(void)
     return ok;
 }
 
-/* Classic, a phone and a 13-inch tablet, stick and D-pad, either hand: the L bar dragged to the
-   screen's bottom (the review's case) is saved, and the lower left still steers (the D-pad still
-   presses); the D-pad keeps a usable size. */
+/* Classic, a phone and a 13-inch tablet, stick and D-pad, either hand: L2 (the lowest L shoulder)
+   dragged to the screen's bottom (the review's case, with the bar before finding 283) is saved, and
+   the lower left still steers (the D-pad still presses); the D-pad keeps a usable size. */
 static void test_moved_bar_steers(void)
 {
     const TouchScreen *screens[2] = {&PHONE, &TABLET13};
@@ -2635,16 +2675,16 @@ static void test_moved_bar_steers(void)
                 touch_open_editor(t);
                 field();
                 float bx, by, bhw, bhh;
-                touch_control(t, TC_LBAR, &bx, &by, NULL);
-                touch_control_size(t, TC_LBAR, &bhw, &bhh);
-                drag(TC_LBAR, sc->width / 2 - bx, 0);   /* across to the middle, then down to the bottom */
-                touch_control(t, TC_LBAR, &bx, &by, NULL);
-                drag(TC_LBAR, 0, sc->height - bhh - by + 5);
+                touch_control(t, TC_L2, &bx, &by, NULL);
+                touch_control_size(t, TC_L2, &bhw, &bhh);
+                drag(TC_L2, sc->width / 2 - bx, 0);   /* across to the middle, then down to the bottom */
+                touch_control(t, TC_L2, &bx, &by, NULL);
+                drag(TC_L2, 0, sc->height - bhh - by + 5);
                 editor_tap(E_DONE);
                 field();
                 CHECK(!touch_editor_open(t));
-                touch_control(t, TC_LBAR, &bx, &by, NULL);
-                if (by + bhh < sc->height - 0.5f) fprintf(stderr, "test_touch: the L bar stopped at %.1f of %.1f\n", by + bhh, sc->height);
+                touch_control(t, TC_L2, &bx, &by, NULL);
+                if (by + bhh < sc->height - 0.5f) fprintf(stderr, "test_touch: L2 stopped at %.1f of %.1f\n", by + bhh, sc->height);
                 CHECK(by + bhh > sc->height - 0.5f);   /* the review's place: against the bottom */
                 if (dpad) {
                     float cx, cy, cr;
@@ -2665,7 +2705,7 @@ static void test_moved_bar_steers(void)
     CHECK(cr > 0);
 }
 
-/* A saved layout with the bar at the bottom (written by a build before the fix) loads and steers;
+/* A saved layout with L2 at the bottom (the bar there, written by a build before the fix) loads and steers;
    one whose controls cover the whole steering area loads with those controls at their default
    places for the run (the note says so, once), and steers; the editor refuses a drag that would
    cover it. */
@@ -2674,17 +2714,17 @@ static void test_saved_layout_steers(void)
     for (int left = 0; left < 2; left++) {
         start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
         float bx, by, bhw, bhh;
-        touch_control(t, TC_LBAR, &bx, &by, NULL);
-        touch_control_size(t, TC_LBAR, &bhw, &bhh);
+        touch_control(t, TC_L2, &bx, &by, NULL);
+        touch_control_size(t, TC_L2, &bhw, &bhh);
         char text[256];
-        snprintf(text, sizeof text, "classic.layout=2;classic.lbar=%.1f,%.1f,1.00", 30.0, PHONE.height - bhh - by);
+        snprintf(text, sizeof text, "classic.layout=2;classic.l2=%.1f,%.1f,1.00", 30.0, PHONE.height - bhh - by);
         TouchSettings s = *touch_settings(t);
         s.left_handed = left;
         touch_layout_parse(&s, text);
         touch_configure(t, &s, &PHONE);
         field();
         CHECK(touch_take_note(t) == NULL);   /* nothing to rescue: the area is the default one */
-        touch_control(t, TC_LBAR, &bx, &by, NULL);
+        touch_control(t, TC_L2, &bx, &by, NULL);
         CHECK(by + bhh > PHONE.height - 0.5f);
         CHECK(steers_at(left ? PHONE.width - 20 : 12, PHONE.height * 0.62f));
     }
@@ -2815,8 +2855,8 @@ static void test_button_style(void)
         field();
         CHECK(count_shapes(TS_CROSS, 0) == 1);
     }
-    /* the smallest Size on the Mi 11i: the face buttons keep their pictures; L3, R3 and the bars,
-       too small for theirs, show their names */
+    /* the smallest Size on the Mi 11i: the face buttons keep their pictures; L3, R3 and the shoulder
+       buttons, too small for theirs, show their names */
     start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
     TouchSettings small = *touch_settings(t);
     small.style = TOUCH_STYLE_ACTIONS;
@@ -2844,7 +2884,7 @@ static void test_air_pictures(void)
     wait_ms(100);
     CHECK(!touch_air_picture(t, TC_TRIANGLE));   /* not yet: the air wait is 150 ms */
     wait_ms(70);
-    CHECK(touch_air_picture(t, TC_TRIANGLE) && touch_air_picture(t, TC_RBAR));
+    CHECK(touch_air_picture(t, TC_TRIANGLE) && touch_air_picture(t, TC_R2));
     CHECK(count_shapes(TS_ICON, TI_STAR) == 1 && count_shapes(TS_ICON, TI_LINK) == 1 && count_shapes(TS_ICON, TI_BRAKE) == 0);
     /* a touch of the ground for 50 ms (a bump, a rail's edge): still the air */
     game.air = 0;
@@ -2872,7 +2912,7 @@ static void test_air_pictures(void)
     field();
     game.air = 1;
     wait_ms(300);
-    CHECK(!touch_air_picture(t, TC_TRIANGLE) && touch_air_picture(t, TC_RBAR));
+    CHECK(!touch_air_picture(t, TC_TRIANGLE) && touch_air_picture(t, TC_R2));
     CHECK(count_shapes(TS_ICON, TI_BRAKE) == 1 && count_shapes(TS_ICON, TI_LINK) == 1);
     touch_up(t, 5, x, y, now);
     field();
@@ -2882,7 +2922,7 @@ static void test_air_pictures(void)
     field();
     game.air = 0;
     wait_ms(300);
-    CHECK(touch_air_picture(t, TC_TRIANGLE) && !touch_air_picture(t, TC_RBAR));
+    CHECK(touch_air_picture(t, TC_TRIANGLE) && !touch_air_picture(t, TC_R2));
     touch_up(t, 6, x, y, now);
     field();
     CHECK(!touch_air_picture(t, TC_TRIANGLE));
@@ -3056,19 +3096,19 @@ static void test_badge_letters(void)
     s.badges = TOUCH_BADGES_XBOX;
     touch_configure(t, &s, NULL);
     field();
-    /* ✕ A, ○ B, ◻ X, △ Y; the bars' L2 L1 R1 R2 as LT LB RB RT; L3 R3 as LS RS */
+    /* ✕ A, ○ B, ◻ X, △ Y; the shoulders L1 L2 L1+L2 R1 R2 R1+R2 as LB LT LB+LT RB RT RB+RT; L3 R3 as LS RS */
     /* (SELECT and START keep their words: their S, E, L, C, T, A, R count too) */
     CHECK(count_char('A') == 2 && count_char('Y') == 1 && count_char('X') == 1);   /* A, START's A */
-    CHECK(count_char('B') == 3);   /* B, LB, RB */
-    CHECK(count_char('T') == 5);   /* LT, RT, SELECT's T, START's two */
+    CHECK(count_char('B') == 5);   /* B, LB, RB, LB+LT, RB+RT */
+    CHECK(count_char('T') == 7);   /* LT, RT, LB+LT, RB+RT, SELECT's T, START's two */
     CHECK(count_char('S') == 4);   /* LS, RS, SELECT's S, START's S */
     CHECK(count_shapes(TS_CROSS, 0) == 0 && count_shapes(TS_CIRCLE, 0) == 0 && count_shapes(TS_SQUARE, 0) == 0 &&
           count_shapes(TS_TRIANGLE, 0) == 0);
     s.badges = TOUCH_BADGES_NINTENDO;
     touch_configure(t, &s, NULL);
     field();
-    /* ✕ B, ○ A, ◻ Y, △ X; the bars ZL L R ZR; L3 R3 LS RS */
-    CHECK(count_char('Z') == 2 && count_char('T') == 3);   /* ZL, ZR; no LT or RT */
+    /* ✕ B, ○ A, ◻ Y, △ X; the shoulders L ZL L+ZL R ZR R+ZR; L3 R3 LS RS */
+    CHECK(count_char('Z') == 4 && count_char('T') == 3);   /* ZL, ZR, L+ZL, R+ZR; no LT or RT */
     CHECK(count_char('Y') == 1 && count_char('X') == 1 && count_char('A') == 2);   /* A, START's A */
     CHECK(count_char('B') == 1);
     s.badges = TOUCH_BADGES_PS2;
@@ -3100,6 +3140,318 @@ static void test_picture_band(void)
         if (shown != steps[i].picture) fprintf(stderr, "test_touch: L3 at %.2f mm: picture %d\n", steps[i].g, shown);
         CHECK(shown == steps[i].picture);
     }
+}
+
+/* Finding 283: Classic's six shoulder buttons. Either hand: each sends what the bar's section sent; L1
+   above L2 at the outer side with L1+L2 inward between them (R1, R2, R1+R2 likewise on the action side);
+   a touch just past a drawn edge is that button's; a thumb that slides from one onto another keeps the first
+   (lift to change, as the bar's sections). */
+static void test_shoulders(void)
+{
+    static const int ctl[6] = {TC_L1, TC_L2, TC_L1L2, TC_R1, TC_R2, TC_R1R2};
+    static const uint16_t sends[6] = {PAD_L1, PAD_L2, PAD_L1 | PAD_L2, PAD_R1, PAD_R2, PAD_R1 | PAD_R2};
+    const uint16_t all = PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2;
+    for (int left = 0; left < 2; left++) {
+        start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+        TouchSettings s = *touch_settings(t);
+        s.left_handed = left;
+        touch_configure(t, &s, NULL);
+        field();
+        float x[6], y[6], hw[6], hh[6];
+        for (int i = 0; i < 6; i++) {
+            CHECK(touch_control(t, ctl[i], &x[i], &y[i], NULL) && touch_control_size(t, ctl[i], &hw[i], &hh[i]));
+            CHECK(hw[i] > hh[i] && 2 * hh[i] >= 6.0f && 2 * hw[i] >= 15.0f);   /* a box, a thumb's target */
+        }
+        for (int g = 0; g < 6; g += 3) {
+            int outer_left = (g == 0) != left;   /* the group's column is at the screen's left edge */
+            CHECK(fabsf(x[g] - x[g + 1]) < 0.01f && y[g] < y[g + 1]);             /* L1 above L2 (R1 above R2) */
+            CHECK(fabsf(y[g + 2] - (y[g] + y[g + 1]) / 2) < 0.01f);               /* the two together centred */
+            CHECK(outer_left ? x[g + 2] > x[g] : x[g + 2] < x[g]);                /* inward of the column */
+            CHECK(outer_left ? x[g] < 154.5f / 2 : x[g] > 154.5f / 2);
+        }
+        for (int i = 0; i < 6; i++) {   /* each at its centre and near its corners: its own buttons, nothing else */
+            for (int k = 0; k < 3; k++) {
+                float px = x[i] + (k == 0 ? 0 : k == 1 ? -hw[i] * 0.9f : hw[i] * 0.9f), py = y[i] + (k == 0 ? 0 : hh[i] * 0.9f);
+                touch_down(t, 70, px, py, now);
+                field();
+                uint16_t b = buttons() & all;
+                if (b != sends[i]) fprintf(stderr, "test_touch: shoulder %d (left %d, spot %d) sent %04x\n", ctl[i], left, k, b);
+                CHECK(b == sends[i]);
+                touch_up(t, 70, px, py, now);
+                fields(4);
+                CHECK(!(buttons() & all));
+            }
+        }
+        /* between L1 and L2: just past a drawn edge is still that button's (touch areas 20 % larger) */
+        float below_l1 = y[0] + hh[0] + 0.4f, above_l2 = y[1] - hh[1] - 0.4f;
+        touch_down(t, 71, x[0], below_l1, now);
+        field();
+        CHECK((buttons() & all) == PAD_L1);
+        touch_up(t, 71, x[0], below_l1, now);
+        fields(4);
+        touch_down(t, 71, x[0], above_l2, now);
+        field();
+        CHECK((buttons() & all) == PAD_L2);
+        touch_up(t, 71, x[0], above_l2, now);
+        fields(4);
+        /* slid from L1 onto L2, then onto L1+L2: L1 held all along; lifted there, nothing */
+        touch_down(t, 72, x[0], y[0], now);
+        field();
+        slide(72, x[0], y[0], x[1], y[1], 150);
+        CHECK((buttons() & all) == PAD_L1);
+        slide(72, x[1], y[1], x[2], y[2], 150);
+        CHECK((buttons() & all) == PAD_L1);
+        touch_up(t, 72, x[2], y[2], now);
+        fields(4);
+        CHECK(!(buttons() & all));
+        /* two thumbs: R1 and L2 together (a Candy Bar) */
+        touch_down(t, 73, x[3], y[3], now);
+        touch_down(t, 74, x[1], y[1], now);
+        field();
+        CHECK((buttons() & all) == (PAD_R1 | PAD_L2));
+        touch_up(t, 73, x[3], y[3], now);
+        touch_up(t, 74, x[1], y[1], now);
+        fields(4);
+    }
+}
+
+/* Finding 283: a layout saved with the shoulder bars ("classic.lbar", "classic.rbar") loads as their
+   buttons, moved as the bar was; a bar made larger keeps its buttons apart; a button's own entry wins;
+   the text written back names the buttons, never the bars. */
+static void test_bar_migration(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    float x0[6], y0[6];
+    for (int c = TC_L1; c <= TC_R1R2; c++) touch_control(t, c, &x0[c - TC_L1], &y0[c - TC_L1], NULL);
+    TouchSettings s = *touch_settings(t);
+    touch_layout_parse(&s, "classic.layout=2;classic.lbar=6.0,-2.0,1.00;classic.rbar=-4.0,3.0,1.00");
+    CHECK(!s.legacy[1]);
+    for (int c = TC_L1; c <= TC_L1L2; c++)
+        CHECK(s.edit[1][c].dx == 6.0f && s.edit[1][c].dy == -2.0f && s.edit[1][c].size == 1 && !s.edit[1][c].hidden);
+    for (int c = TC_R1; c <= TC_R1R2; c++) CHECK(s.edit[1][c].dx == -4.0f && s.edit[1][c].dy == 3.0f && s.edit[1][c].size == 1);
+    touch_configure(t, &s, &PHONE);
+    field();
+    for (int c = TC_L1; c <= TC_R1R2; c++) {
+        float x, y;
+        touch_control(t, c, &x, &y, NULL);
+        float mx = c <= TC_L1L2 ? 6.0f : -4.0f, my = c <= TC_L1L2 ? -2.0f : 3.0f;
+        CHECK(fabsf(x - (x0[c - TC_L1] + mx)) < 0.15f && fabsf(y - (y0[c - TC_L1] + my)) < 0.15f);
+    }
+    char text[2048];
+    touch_layout_format(touch_settings(t), text, sizeof text);
+    CHECK(!strstr(text, "bar") && strstr(text, "classic.l1=6.0,-2.0,1.00") && strstr(text, "classic.r1r2=-4.0,3.0,1.00"));
+    /* a bar at 150 %: its buttons at 150 %, spread about the group's middle, still apart */
+    touch_layout_parse(&s, "classic.layout=2;classic.lbar=0.0,0.0,1.50;classic.rbar=0.0,0.0,1.50");
+    touch_configure(t, &s, &PHONE);
+    field();
+    for (int c = TC_L1; c <= TC_R1R2; c++) {
+        CHECK(fabsf(touch_settings(t)->edit[1][c].size - 1.5f) < 0.001f);
+        for (int d = c + 1; d <= TC_R1R2; d++) {
+            float ax, ay, ahw, ahh, bx, by, bhw, bhh;
+            touch_control(t, c, &ax, &ay, NULL), touch_control_size(t, c, &ahw, &ahh);
+            touch_control(t, d, &bx, &by, NULL), touch_control_size(t, d, &bhw, &bhh);
+            CHECK(fmaxf(fabsf(ax - bx) - ahw - bhw, fabsf(ay - by) - ahh - bhh) >= 3.0f);
+        }
+    }
+    /* a button's own entry wins, before or after the bar's */
+    touch_layout_parse(&s, "classic.layout=2;classic.l1=1.0,1.0,0.80;classic.lbar=6.0,-2.0,1.00");
+    CHECK(s.edit[1][TC_L1].dx == 1.0f && s.edit[1][TC_L1].size == 0.8f && s.edit[1][TC_L2].dx == 6.0f);
+    touch_layout_parse(&s, "classic.layout=2;classic.lbar=6.0,-2.0,1.00;classic.l1=1.0,1.0,0.80");
+    CHECK(s.edit[1][TC_L1].dx == 1.0f && s.edit[1][TC_L2].dx == 6.0f);
+    /* a 0.8.0 layout (no mark) with a bar: 0.8.0's places, the bar moved into its buttons */
+    touch_layout_parse(&s, "classic.lbar=2.0,0.0,1.00");
+    CHECK(s.legacy[1] && s.edit[1][TC_L1L2].dx == 2.0f);
+    /* a bar entry out of range is dropped as any other */
+    touch_layout_parse(&s, "classic.layout=2;classic.lbar=2.0,0.0,9.00");
+    CHECK(s.edit[1][TC_L1].size == 1 && s.edit[1][TC_L1].dx == 0);
+    /* Thumb zones never had a bar: "thumb.lbar" is nothing */
+    touch_layout_parse(&s, "thumb.layout=2;thumb.lbar=2.0,0.0,1.00");
+    CHECK(s.edit[1][TC_L1].dx == 0 && s.edit[0][TC_L1].dx == 0);
+}
+
+/* The shapes drawn within 0.5 mm of a point. */
+static int shapes_at(float x, float y)
+{
+    static TouchShape out[TOUCH_SHAPES];
+    int n = touch_shapes(t, out, TOUCH_SHAPES), found = 0;
+    for (int i = 0; i < n; i++)
+        if (out[i].kind != TS_CHAR && fabsf(out[i].x - x) < 0.5f && fabsf(out[i].y - y) < 0.5f) found++;
+    return found;
+}
+
+/* Finding 283: a hidden control (",hide" in touch_edits) draws nothing and takes no touch; Pause and
+   the steering stick never hide; the + spots hide with ✕ or their face button. */
+static void test_hidden_controls(void)
+{
+    for (int preset = 0; preset < 2; preset++) {
+        start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        int c = preset ? TC_R1 : TC_HOP;
+        uint16_t sent = PAD_R1 | PAD_R2;
+        float x, y;
+        at(c, &x, &y);
+        CHECK(shapes_at(x, y) > 0);
+        TouchSettings s = *touch_settings(t);
+        touch_layout_parse(&s, preset ? "classic.layout=2;classic.r1=0.0,0.0,1.00,hide;classic.pause=0.0,0.0,1.00,hide;classic.stick=0.0,0.0,1.00,hide"
+                                      : "thumb.layout=2;thumb.hop=0.0,0.0,1.00,hide;thumb.pause=0.0,0.0,1.00,hide");
+        CHECK(s.edit[preset][c].hidden);
+        touch_configure(t, &s, NULL);
+        field();
+        float hx, hy;
+        CHECK(!touch_control(t, c, &hx, &hy, NULL));
+        CHECK(shapes_at(x, y) == 0);
+        touch_down(t, 80, x, y, now);
+        field();
+        CHECK(!(buttons() & sent));
+        touch_up(t, 80, x, y, now);
+        fields(4);
+        CHECK(touch_control(t, TC_PAUSE, &hx, &hy, NULL) && touch_control(t, TC_STICK, &hx, &hy, NULL));   /* never hidden */
+        char text[2048];
+        touch_layout_format(touch_settings(t), text, sizeof text);
+        CHECK(strstr(text, preset ? "classic.r1=0.0,0.0,1.00,hide" : "thumb.hop=0.0,0.0,1.00,hide") && !strstr(text, "pause"));
+        TouchSettings back;
+        touch_settings_default(&back);
+        touch_layout_parse(&back, text);
+        CHECK(back.edit[preset][c].hidden && !back.legacy[preset]);
+    }
+    /* ✕ hidden: both + spots go too, no ✕ from there */
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    float px, py;
+    at(TC_PLUS_LEFT, &px, &py);
+    TouchSettings s = *touch_settings(t);
+    touch_layout_parse(&s, "classic.layout=2;classic.cross=0.0,0.0,1.00,hide");
+    touch_configure(t, &s, NULL);
+    field();
+    CHECK(!touch_control(t, TC_PLUS_LEFT, NULL, NULL, NULL) && !touch_control(t, TC_PLUS_RIGHT, NULL, NULL, NULL));
+    touch_down(t, 81, px, py, now);
+    field();
+    CHECK(!(buttons() & PAD_CROSS));
+    touch_up(t, 81, px, py, now);
+    fields(4);
+    /* an older reader's text (no ",hide") and a stray word after the numbers: shown */
+    touch_layout_parse(&s, "classic.layout=2;classic.l3=1.0,0.0,1.00;classic.r3=0.0,0.0,1.00,x");
+    CHECK(!s.edit[1][TC_L3].hidden && !s.edit[1][TC_R3].hidden && s.edit[1][TC_L3].dx == 1.0f);
+}
+
+/* Finding 283: the editor's HIDE. On: a tap hides a control, and it stays on for more; the hidden show
+   as ghosts there, and a tap on one shows it again; Pause and the stick do not hide; HIDE again ends
+   it (the hidden then neither show nor move); UNDO takes a hide back; DONE saves the visibility, RESET
+   shows every control again at its place and size. */
+static void test_editor_hide(void)
+{
+    for (int left = 0; left < 2; left++) {
+        start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+        TouchSettings set = *touch_settings(t);
+        set.left_handed = left;
+        touch_configure(t, &set, &PHONE);
+        field();
+        touch_open_editor(t);
+        field();
+        float lx, ly, rx, ry, px, py, sx, sy, hx, hy;
+        at(TC_L3, &lx, &ly), at(TC_R1R2, &rx, &ry), at(TC_PAUSE, &px, &py), at(TC_STICK, &sx, &sy);
+        CHECK(touch_target(t, TOUCH_TARGET_EDITOR, E_HIDE, &hx, &hy));
+        int before = shapes_at(lx, ly);
+        editor_tap(E_HIDE);
+        touch_down(t, 82, lx, ly, now), field(), touch_up(t, 82, lx, ly, now), field();
+        touch_down(t, 82, rx, ry, now), field(), touch_up(t, 82, rx, ry, now), field();
+        touch_down(t, 82, px, py, now), field(), touch_up(t, 82, px, py, now), field();   /* Pause: no */
+        touch_down(t, 82, sx, sy, now), field(), touch_up(t, 82, sx, sy, now), field();   /* the stick: no */
+        const TouchEdit *e = touch_settings(t)->edit[1];
+        CHECK(e[TC_L3].hidden && e[TC_R1R2].hidden && !e[TC_PAUSE].hidden && !e[TC_STICK].hidden);
+        CHECK(e[TC_L3].dx == 0 && e[TC_L3].dy == 0);   /* a tap moves nothing */
+        /* the ghosts: still found, drawn fainter */
+        float gx, gy;
+        CHECK(touch_control(t, TC_L3, &gx, &gy, NULL) && fabsf(gx - lx) < 0.01f);
+        CHECK(shapes_at(lx, ly) == before);
+        /* a drag on a control in HIDE mode moves it not */
+        float cx, cy, cx2, cy2;
+        at(TC_CROSS, &cx, &cy);
+        touch_down(t, 83, cx, cy, now);
+        field();
+        slide(83, cx, cy, cx - 20, cy - 10, 200);
+        touch_up(t, 83, cx - 20, cy - 10, now);
+        field();
+        at(TC_CROSS, &cx2, &cy2);
+        CHECK(fabsf(cx2 - cx) < 0.01f && fabsf(cy2 - cy) < 0.01f && !touch_settings(t)->edit[1][TC_CROSS].hidden);
+        /* L3's ghost tapped: shown again */
+        touch_down(t, 82, lx, ly, now), field(), touch_up(t, 82, lx, ly, now), field();
+        CHECK(!touch_settings(t)->edit[1][TC_L3].hidden);
+        editor_tap(E_HIDE);   /* off: the hidden one is gone, and can't be grabbed */
+        CHECK(!touch_control(t, TC_R1R2, &gx, &gy, NULL) && shapes_at(rx, ry) == 0);
+        touch_down(t, 84, rx, ry, now);
+        field();
+        slide(84, rx, ry, rx, ry + 8, 150);
+        touch_up(t, 84, rx, ry + 8, now);
+        field();
+        CHECK(touch_settings(t)->edit[1][TC_R1R2].dy == 0);
+        /* UNDO: L3 hidden again; REDO: shown */
+        editor_tap(E_UNDO);
+        CHECK(touch_settings(t)->edit[1][TC_L3].hidden);
+        editor_tap(E_REDO);
+        CHECK(!touch_settings(t)->edit[1][TC_L3].hidden);
+        /* DONE saves the visibility; in the race R1+R2 takes no touch */
+        editor_tap(E_DONE);
+        TouchSettings saved;
+        CHECK(touch_take_saved(t, &saved) & TOUCH_SAVED_LAYOUT);
+        char text[2048];
+        touch_layout_format(&saved, text, sizeof text);
+        CHECK(strstr(text, "classic.r1r2=0.0,0.0,1.00,hide") && !strstr(text, "l3"));
+        touch_down(t, 85, rx, ry, now);
+        field();
+        CHECK(!(buttons() & (PAD_R1 | PAD_R2)));
+        touch_up(t, 85, rx, ry, now);
+        fields(4);
+        /* RESET: every control shown, at its place and size */
+        touch_open_editor(t);
+        field();
+        float bx, by;
+        at(TC_TRIANGLE, &bx, &by);
+        drag(TC_TRIANGLE, 0, -3);
+        editor_tap(E_RESET);
+        for (int c = 0; c < TC_COUNT; c++) {
+            const TouchEdit *r = &touch_settings(t)->edit[1][c];
+            CHECK(!r->hidden && r->dx == 0 && r->dy == 0 && r->size == 1);
+        }
+        CHECK(touch_control(t, TC_R1R2, &gx, &gy, NULL) && fabsf(gx - rx) < 0.01f && fabsf(gy - ry) < 0.01f);
+        editor_tap(E_DONE);
+        CHECK(touch_take_saved(t, &saved) & TOUCH_SAVED_LAYOUT);
+        touch_layout_format(&saved, text, sizeof text);
+        CHECK(text[0] == 0);
+    }
+    /* the Air tab: HIDE does nothing (the trick stick's spot is no button) */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_AIR);
+    editor_tap(E_HIDE);
+    float tx, ty;
+    at(TC_TRICK, &tx, &ty);
+    touch_down(t, 86, tx, ty, now), field(), touch_up(t, 86, tx, ty, now), field();
+    CHECK(!touch_settings(t)->edit[0][TC_TRICK].hidden);
+    /* Thumb zones' ground: PEDAL hides (the player's choice), and comes back by its ghost */
+    editor_tap(E_GROUND);
+    editor_tap(E_HIDE);
+    float qx, qy;
+    at(TC_PEDAL, &qx, &qy);
+    touch_down(t, 87, qx, qy, now), field(), touch_up(t, 87, qx, qy, now), field();
+    CHECK(touch_settings(t)->edit[0][TC_PEDAL].hidden);
+    touch_down(t, 87, qx, qy, now), field(), touch_up(t, 87, qx, qy, now), field();
+    CHECK(!touch_settings(t)->edit[0][TC_PEDAL].hidden);
+}
+
+/* The editor alone (the launcher's "Edit the touch layout") has the same bar: HIDE there too. */
+static void test_editor_alone_hide(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    touch_open_editor_alone(t);
+    field();
+    float x, y;
+    at(TC_L1L2, &x, &y);
+    editor_tap(E_HIDE);
+    touch_down(t, 88, x, y, now), field(), touch_up(t, 88, x, y, now), field();
+    editor_tap(E_DONE);
+    TouchSettings saved;
+    CHECK(touch_take_saved(t, &saved) & TOUCH_SAVED_LAYOUT);
+    CHECK(saved.edit[1][TC_L1L2].hidden && !touch_editor_open(t));
 }
 
 int main(void)
@@ -3141,6 +3493,7 @@ int main(void)
     test_screen_bounds();
     test_tablet();
     test_phone_defaults();
+    test_editor_bar_phones();
     test_old_edits();
     test_undo_redo();
     test_editor_alone();
@@ -3153,6 +3506,11 @@ int main(void)
     test_dpad_room_floor();
     test_badge_letters();
     test_picture_band();
+    test_shoulders();
+    test_bar_migration();
+    test_hidden_controls();
+    test_editor_hide();
+    test_editor_alone_hide();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");
