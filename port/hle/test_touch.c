@@ -3324,6 +3324,74 @@ static void test_bar_migration(void)
     CHECK(s.edit[1][TC_L1].dx == 0 && s.edit[0][TC_L1].dx == 0);
 }
 
+/* The review of finding 283: on a 16:9 phone (104 x 58.5 mm) the default L1+L2 and R1+R2 overlapped
+   (their groups are anchored to opposite corners). On narrow and wide screens, Size 70 to 105, both
+   hands: every L button's touch area GAP_MM clear of every R button's, each on the screen, each
+   centre sends its own buttons; a moved L1+L2 stays clear of the speedometer's corner (0.3 of the
+   height across, 0.21 down); on the reference phone nothing moved. */
+static void test_shoulders_narrow(void)
+{
+    static const int ctl[6] = {TC_L1, TC_L2, TC_L1L2, TC_R1, TC_R2, TC_R1R2};
+    static const uint16_t sends[6] = {PAD_L1, PAD_L2, PAD_L1 | PAD_L2, PAD_R1, PAD_R2, PAD_R1 | PAD_R2};
+    static const float shapes[][2] = {{88.5f, 49.9f}, {104.0f, 58.5f}, {110.0f, 50.0f}, {121.2f, 68.1f}, {130.0f, 60.0f},
+                                      {154.5f, 69.5f}, {176.4f, 115.9f}, {264.8f, 198.6f}};
+    static const int sizes[] = {70, 100, 105};
+    const uint16_t all = PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2;
+    for (int i = 0; i < (int)(sizeof shapes / sizeof *shapes); i++)
+        for (int si = 0; si < 3; si++)
+            for (int left = 0; left < 2; left++) {
+                float W = shapes[i][0], H = shapes[i][1];
+                TouchScreen sc = {W, H, 0, 0, 0, 0, 0, 0, 0, 0};
+                start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+                TouchSettings s = *touch_settings(t);
+                s.left_handed = left, s.size = sizes[si];
+                touch_configure(t, &s, &sc);
+                field();
+                float x[6], y[6], hw[6], hh[6];
+                for (int k = 0; k < 6; k++) {
+                    CHECK(touch_control(t, ctl[k], &x[k], &y[k], NULL) && touch_control_size(t, ctl[k], &hw[k], &hh[k]));
+                    CHECK(x[k] - hw[k] >= 0 && x[k] + hw[k] <= W && y[k] - hh[k] >= 0 && y[k] + hh[k] <= H);
+                }
+                for (int a = 0; a < 3; a++)
+                    for (int b = 3; b < 6; b++) {
+                        float gap = fmaxf(fabsf(x[a] - x[b]) - 1.2f * (hw[a] + hw[b]), fabsf(y[a] - y[b]) - 1.2f * (hh[a] + hh[b]));
+                        if (gap < 3.0f) fprintf(stderr, "test_touch: %.1f x %.1f Size %d left %d: %d and %d %.2f mm apart\n", W, H, sizes[si], left, ctl[a], ctl[b], gap);
+                        CHECK(gap >= 3.0f);
+                    }
+                int moved = left ? x[2] > x[0] : x[2] < x[0];   /* L1+L2 outward of its column */
+                if (W == 154.5f) CHECK(!moved);
+                if (W == 104.0f && si > 0) CHECK(moved);
+                if (moved && !left) CHECK(x[2] - hw[2] >= 0.3f * H || y[2] - hh[2] >= 0.21f * H);
+                check_layout_clear(1.0f, W, H);
+                for (int k = 0; k < 6; k++) {
+                    touch_down(t, 91, x[k], y[k], now);
+                    field();
+                    if ((buttons() & all) != sends[k]) fprintf(stderr, "test_touch: %.1f x %.1f Size %d left %d: %d sent %04x\n", W, H, sizes[si], left, ctl[k], buttons() & all);
+                    CHECK((buttons() & all) == sends[k]);
+                    touch_up(t, 91, x[k], y[k], now);
+                    fields(4);
+                }
+                if (W != 104.0f || si != 1) continue;
+                /* the moved L1+L2 in the editor: a drag takes it where the finger goes, and it stays
+                   there after DONE (its move across stored mirrored) */
+                touch_open_editor(t);
+                field();
+                drag(TC_L1L2, 0, 4);
+                float ex, ey;
+                at(TC_L1L2, &ex, &ey);
+                CHECK(fabsf(ex - x[2]) < 0.3f && fabsf(ey - (y[2] + 4)) < 0.3f);
+                float mx = left ? -3.0f : 3.0f;   /* toward the middle, a little */
+                drag(TC_L1L2, mx, 0);
+                at(TC_L1L2, &ex, &ey);
+                if (fabsf(ex - (x[2] + mx)) >= 0.3f) fprintf(stderr, "test_touch: moved L1+L2 dragged %.1f went %.1f (left %d)\n", mx, ex - x[2], left);
+                CHECK(fabsf(ex - (x[2] + mx)) < 0.3f);
+                editor_tap(E_DONE);
+                float fx, fy;
+                at(TC_L1L2, &fx, &fy);
+                CHECK(fabsf(fx - ex) < 0.01f && fabsf(fy - ey) < 0.01f);
+            }
+}
+
 /* The review of finding 283: a bar saved smaller, at a small Size setting, stacked its three buttons
    (every tap sent L1). Whatever the Size setting and the bar's size, the three stay apart and each
    centre sends its own buttons, on a phone and a tablet. */
@@ -3703,6 +3771,7 @@ int main(void)
     test_shoulders();
     test_bar_migration();
     test_bar_migration_sizes();
+    test_shoulders_narrow();
     test_hidden_controls();
     test_editor_hide();
     test_editor_show_refused();

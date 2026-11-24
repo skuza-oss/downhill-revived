@@ -295,6 +295,7 @@ struct Touch {
     double repeat_at;
     int repeated;
     int tablet;                /* laid out with the tablet defaults (lay_out) */
+    int combo_out;             /* Classic's L1+L2 on its column's far side, a narrow screen (lay_out) */
     int pictures_known;        /* lay_out has decided each control's picture once (Ctl.pic) */
     /* air */
     int air_layout;
@@ -521,6 +522,12 @@ static float dist(float ax, float ay, float bx, float by) { return hypotf(ax - b
 static int right_handed(const Touch *t) { return !t->set.left_handed; }
 /* x as the right-handed layout has it (the left hand mirrors). */
 static float mirror_x(const Touch *t, float x) { return right_handed(t) ? x : t->screen.width - x; }
+/* A move across the screen as the control's edit stores it: as the right hand has it, and L1+L2 on its
+   column's far side (combo_out) as the default side has it. */
+static float edit_sx(const Touch *t, int c)
+{
+    return (right_handed(t) ? 1.0f : -1.0f) * (c == TC_L1L2 && t->combo_out ? -1.0f : 1.0f);
+}
 
 /* The D-pad's arms (finding 214): their half size, the distance of an arm's centre from the rest
    point (the arms are GAP_MM apart, like the other buttons) and the pad's half extent. The size
@@ -755,6 +762,18 @@ static void picture_step(Touch *t, const unsigned char *was, int known)
     }
 }
 
+/* The largest s at which Classic's left shoulder `c` (its right edge, a BL place) and R1+R2 (its left
+   edge, a BR place) have touch areas GAP_MM apart across the screen; x and the button scale are linear
+   in s (bs = 1.2 s - 0.2 base). */
+static float classic_fit(const Touch *t, int c, float base, int hud_moved)
+{
+    Place pl, pr;
+    if (!place_of(TOUCH_CLASSIC, c, t->set.attacks, hud_moved, &pl) || !place_of(TOUCH_CLASSIC, TC_R1R2, t->set.attacks, hud_moved, &pr))
+        return 1e9f;
+    float across = (pl.px + 100 - pr.px) * REF_W / 100, halves = AREA_GROW * (pl.w + pr.w) / 2 * REF_W / 100;
+    return (t->screen.width - 2 * tablet_inward(t) - GAP_MM + 0.2f * halves * base) / (across + 1.2f * halves);
+}
+
 /* The layout for the settings and the screen. */
 static void lay_out(Touch *t, int hud_moved)
 {
@@ -769,6 +788,13 @@ static void lay_out(Touch *t, int hud_moved)
     float base = t->tablet ? TOUCH_TABLET_SCALE : 1.0f;
     float s = (st->size > 0 ? st->size / 100.0f : 1.0f) * base;
     if (s > limit) s = limit;
+    /* Classic across a narrow screen: L1+L2's and R1+R2's touch areas GAP_MM apart (finding 283's review).
+       A little smaller keeps them as designed; past a tenth (a 16:9 phone) L1+L2 goes to its column's
+       far side instead (below), and only the column must clear R1+R2. */
+    if (st->preset == TOUCH_CLASSIC && !st->legacy[1]) {
+        float fit_in = classic_fit(t, TC_L1L2, base, hud_moved), fit_out = classic_fit(t, TC_L1, base, hud_moved);
+        if (s > fit_in) s = fit_in >= 0.9f * s ? fit_in - 0.001f : fminf(s, fit_out);
+    }
     if (s < 0.5f) s = 0.5f;
     t->s = s;
     t->bs = touch_button_scale(s / base) * base;   /* a phone: touch_button_scale(s), as before */
@@ -812,6 +838,24 @@ static void lay_out(Touch *t, int hud_moved)
             float rx = c == TC_TRICK ? 7 : k->box ? k->hw : k->r, ry = c == TC_TRICK ? 7 : k->box ? k->hh : k->r;
             k->x = 2 * rx >= W ? W / 2 : clampf(k->x, rx, W - rx);
             k->y = 2 * ry >= H ? H / 2 : clampf(k->y, ry, H - ry);
+        }
+    }
+    /* Classic's two-together buttons are the shoulders nearest the middle, their groups anchored to
+       opposite corners: on a narrow screen (a 16:9 phone: 104 mm across) L1+L2 and R1+R2 met. Their
+       touch areas kept GAP_MM apart by L1+L2's going to the far side of the L1 / L2 column (under the
+       speedometer's corner, which ends at 0.21 of the height). Its move across is then mirrored as
+       the left hand's are (edit_sx): a bar's migrated spread still takes it away from the column. */
+    t->combo_out = 0;
+    if (st->preset == TOUCH_CLASSIC && current) {
+        Ctl *a = &t->ctl[TC_L1L2], *b = &t->ctl[TC_R1R2], *col = &t->ctl[TC_L1];
+        float gap = fmaxf(fabsf(a->x0 - b->x0) - AREA_GROW * (a->r0 + b->r0), fabsf(a->y0 - b->y0) - AREA_GROW * (a->hh0 + b->hh0));
+        if (a->on && b->on && col->on && gap < GAP_MM - 0.01f) {
+            const TouchEdit *e = &st->edit[1][TC_L1L2];
+            float moved = a->x - a->x0;
+            t->combo_out = 1;
+            a->x0 = 2 * col->x0 - a->x0;
+            a->x = a->x0 - moved;
+            if (e->dx != 0 || e->dy != 0 || e->size != 1) a->x = 2 * a->hw >= W ? W / 2 : clampf(a->x, a->hw, W - a->hw);
         }
     }
     /* Classic's + spots press ✕ with ◻ or ○: hidden with either */
@@ -1880,7 +1924,7 @@ static void keep_on_screen(Touch *t, int c)
     float x = 2 * rx >= W ? W / 2 : clampf(k->x, rx, W - rx), y = 2 * ry >= H ? H / 2 : clampf(k->y, ry, H - ry);
     if (x == k->x && y == k->y) return;
     TouchEdit *e = edit_of(t, c);
-    e->dx += (x - k->x) * (right_handed(t) ? 1.0f : -1.0f);   /* edits are stored as the right hand has them */
+    e->dx += (x - k->x) * edit_sx(t, c);
     e->dy += y - k->y;
     lay_out(t, t->set.hud_moved);
 }
@@ -2101,7 +2145,7 @@ static void editor_move(Touch *t, Finger *f)
     TouchEdit *e = edit_of(t, f->control);
     float want_x = f->x + f->grab_dx, want_y = f->y + f->grab_dy;
     const Ctl *k = &t->ctl[f->control];
-    float sx = right_handed(t) ? 1.0f : -1.0f;   /* edits are stored as the right hand has them */
+    float sx = edit_sx(t, f->control);
     e->dx += (want_x - k->x) * sx;
     e->dy += want_y - k->y;
     lay_out(t, t->set.hud_moved);
