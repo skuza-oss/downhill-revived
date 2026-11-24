@@ -392,6 +392,44 @@ static void colour_read(void)
     }
 }
 
+/* An upload whose every pixel has its own colour, imported at 2x (finding 281: the 56 pages of the
+   picture go through the import atlas and are drawn in one pass): each GS pixel must be a 2x2 block
+   of its own colour, so a page drawn from the wrong place in the atlas, or out of order, fails.
+   Last, after colour_read: it overwrites page 344's area, which nothing after reads; no dump. */
+static uint32_t pattern(unsigned x, unsigned y)
+{
+    return 0x80000000u | (x & 255) | (y & 255) << 8 | ((x >> 8 | (x * 7 + y * 13) << 1) & 255) << 16;
+}
+
+static void upload_pattern(void)
+{
+    gs_write(&gs, GS_BITBLTBUF, (344ULL * 32) << 32 | 8ULL << 48);
+    gs_write(&gs, GS_TRXPOS, 0);
+    gs_write(&gs, GS_TRXREG, WIDTH | (uint64_t)HEIGHT << 32);
+    gs_write(&gs, GS_TRXDIR, 0);
+    for (unsigned y = 0; y < HEIGHT; y++)
+        for (unsigned x = 0; x < WIDTH; x += 2)
+            gs_write(&gs, GS_HWREG, pattern(x, y) | (uint64_t)pattern(x + 1, y) << 32);
+    gs_priv_write(&gs, GS_PMODE, 2);
+    gs_priv_write(&gs, GS_SMODE2, 0);
+    gs_priv_write(&gs, GS_DISPFB2, 344 | 8ULL << 9);
+    gs_priv_write(&gs, GS_DISPLAY2, (WIDTH - 1ULL) << 32 | (HEIGHT - 1ULL) << 44);
+    unsigned w = 0, h = 0, wrong = 0;
+    ++kernel_vsync_count;
+    gs_native_vsync(&gs, &w, &h, 0);
+    uint32_t *pixels = gs_native_picture(&gs, &w, &h);
+    int ok = pixels && w == WIDTH * 2 && h == HEIGHT * 2;
+    for (unsigned y = 0; ok && y < h; y++)
+        for (unsigned x = 0; x < w; x++) {
+            uint32_t want = pattern(x / 2, y / 2) & 0xFFFFFF, got = pixels[y * w + x] & 0xFFFFFF;
+            if (got != want && wrong++ < 4) printf("  (%u,%u): %06X, want %06X\n", x, y, got, want);
+        }
+    ok = ok && !wrong;
+    if (!ok) failures++;
+    printf("no draw: a patterned CPU upload at 2x: %s (%ux%u, %u incorrect pixels)\n", ok ? "PASS" : "FAIL", w, h,
+           wrong);
+}
+
 int main(void)
 {
     gs_reset(&gs);
@@ -493,6 +531,7 @@ int main(void)
     held(56, 0x80204060, "a held picture survives a draw into its surface");
     blend_scenes();
     colour_read();
+    upload_pattern();
 
     if (presented_on) {
         printf("presented: %u pictures checked against the window\n", presented_checks);

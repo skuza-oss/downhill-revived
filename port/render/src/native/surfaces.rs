@@ -52,6 +52,10 @@ pub const SURFACES: usize = DHDR_NATIVE_SURFACES as usize;
 /// The import texture's side (a page of IMPORT or ALPHA_UPLOAD pixels at 1x).
 const IMPORT_SIDE: u32 = 64;
 
+/// The import atlas: ATLAS_PAGES x ATLAS_PAGES pages of IMPORT_SIDE, where a run of upscaled
+/// IMPORT pages into one surface waits to be drawn in one pass (finding 281).
+const ATLAS_PAGES: u32 = 16;
+
 /// One surface's texture. Set only by this module.
 #[derive(Default)]
 pub struct Surface {
@@ -76,6 +80,16 @@ struct Grow {
     view: wgpu::TextureView,
     size: [u32; 2],
     depth: bool,
+}
+
+/// An upscaled IMPORT page waiting in the atlas (`Surfaces::import`): its command's rectangle (GS
+/// pixels) and its slot.
+struct Pending {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    slot: u32,
 }
 
 /// The scratch texture and its draw bind group.
@@ -115,6 +129,11 @@ pub struct Surfaces {
     /// 64 x 64 RGBA8 (TextureBinding | CopyDst): IMPORT pages for upscaled surfaces, ALPHA_UPLOAD
     /// pages. Made on first use.
     import: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// The import atlas (TextureBinding | CopyDst), made on first use, and the pages in it not yet
+    /// drawn, all into surface `pending_target` (`flush_imports`).
+    atlas: Option<(wgpu::Texture, wgpu::TextureView)>,
+    pending: Vec<Pending>,
+    pending_target: usize,
     fill: Option<DepthFill>,
 }
 
@@ -274,20 +293,41 @@ fn copy_box(encoder: &mut wgpu::CommandEncoder, from: &wgpu::Texture, from_size:
 /// and `bind` as group 1.
 #[allow(clippy::too_many_arguments)]
 fn rect_pass(kit: &mut Kit, view: &wgpu::TextureView, size: [u32; 2], pipe: &wgpu::RenderPipeline, map: [f32; 4],
-             bind: &wgpu::BindGroup, x: u32, y: u32, mut w: u32, mut h: u32) {
-    if x >= size[0] || y >= size[1] {
+             bind: &wgpu::BindGroup, x: u32, y: u32, w: u32, h: u32) {
+    rect_passes(kit, view, size, pipe, bind, &[Rect { map, x, y, w, h }]);
+}
+
+/// A rectangle of `rect_passes`: its 16 bytes of constants and where it draws (texture pixels).
+struct Rect {
+    map: [f32; 4],
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+/// `rect_pass` for several rectangles, in order, in one pass (the same pixels as a pass each: each
+/// draw loads what the one before it stored).
+fn rect_passes(kit: &mut Kit, view: &wgpu::TextureView, size: [u32; 2], pipe: &wgpu::RenderPipeline,
+               bind: &wgpu::BindGroup, rects: &[Rect]) {
+    let mut draws = Vec::with_capacity(rects.len());
+    for r in rects {
+        if r.x >= size[0] || r.y >= size[1] {
+            continue;
+        }
+        let (w, h) = (r.w.min(size[0] - r.x), r.h.min(size[1] - r.y));
+        if w == 0 || h == 0 {
+            continue;
+        }
+        let mut bytes = [0u8; 16];
+        for (i, v) in r.map.iter().enumerate() {
+            bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        draws.push((kit.arenas.constants(&bytes), r.x, r.y, w, h));
+    }
+    if draws.is_empty() {
         return;
     }
-    w = w.min(size[0] - x);
-    h = h.min(size[1] - y);
-    if w == 0 || h == 0 {
-        return;
-    }
-    let mut bytes = [0u8; 16];
-    for (i, v) in map.iter().enumerate() {
-        bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
-    }
-    let offset = kit.arenas.constants(&bytes);
     let Some(uniforms) = kit.arenas.uniform_group() else {
         crate::host::log("gs native: a surface pass before the arenas were reserved (skipped)");
         return;
@@ -308,22 +348,23 @@ fn rect_pass(kit: &mut Kit, view: &wgpu::TextureView, size: [u32; 2], pipe: &wgp
         multiview_mask: None,
     });
     pass.set_pipeline(pipe);
-    pass.set_bind_group(0, uniforms, &[offset]);
     pass.set_bind_group(1, bind, &[]);
-    pass.set_viewport(x as f32, y as f32, w as f32, h as f32, 0.0, 1.0);
-    pass.set_scissor_rect(x, y, w, h);
-    pass.draw(0..3, 0..1);
+    for (offset, x, y, w, h) in draws {
+        pass.set_bind_group(0, uniforms, &[offset]);
+        pass.set_viewport(x as f32, y as f32, w as f32, h as f32, 0.0, 1.0);
+        pass.set_scissor_rect(x, y, w, h);
+        pass.draw(0..3, 0..1);
+    }
 }
 
-/// native_blit: a w x h rectangle (GS pixels) of a texture at scale `from`, at (sx, sy), into
-/// surface t at (x, y), when the scales differ (native.wgsl native_blit).
+/// native_blit's rectangle: where a w x h rectangle (GS pixels) at (x, y) of a surface at scale
+/// `tt` (its texture `size`) lands in texture pixels, and its constants for a source at scale
+/// `from` read at (sx, sy); None when nothing of it is on the surface.
 #[allow(clippy::too_many_arguments)]
-fn blit(kit: &mut Kit, source: &wgpu::TextureView, from: u32, sx: i32, sy: i32, t: &Surface, x: i32, y: i32,
-        mut w: i32, mut h: i32) {
-    let tt = t.scale;
-    let Some(view) = t.view.as_ref().filter(|_| tt != 0) else { return };
+fn blit_rect(tt: u32, size: [u32; 2], from: u32, sx: i32, sy: i32, x: i32, y: i32, mut w: i32, mut h: i32)
+             -> Option<Rect> {
     // C: int arithmetic on the GS pixel rectangle against the texture's size / scale.
-    let (tw, th) = ((t.size[0] / tt) as i32, (t.size[1] / tt) as i32);
+    let (tw, th) = ((size[0] / tt) as i32, (size[1] / tt) as i32);
     if x.wrapping_add(w) > tw {
         w = tw.wrapping_sub(x);
     }
@@ -331,13 +372,28 @@ fn blit(kit: &mut Kit, source: &wgpu::TextureView, from: u32, sx: i32, sy: i32, 
         h = th.wrapping_sub(y);
     }
     if w <= 0 || h <= 0 || x < 0 || y < 0 {
-        return;
+        return None;
     }
-    let map = [sx.wrapping_sub(x) as f32, sy.wrapping_sub(y) as f32, tt as f32, from as f32];
+    Some(Rect {
+        map: [sx.wrapping_sub(x) as f32, sy.wrapping_sub(y) as f32, tt as f32, from as f32],
+        x: (x as u32).wrapping_mul(tt),
+        y: (y as u32).wrapping_mul(tt),
+        w: (w as u32).wrapping_mul(tt),
+        h: (h as u32).wrapping_mul(tt),
+    })
+}
+
+/// native_blit: a w x h rectangle (GS pixels) of a texture at scale `from`, at (sx, sy), into
+/// surface t at (x, y), when the scales differ (native.wgsl native_blit).
+#[allow(clippy::too_many_arguments)]
+fn blit(kit: &mut Kit, source: &wgpu::TextureView, from: u32, sx: i32, sy: i32, t: &Surface, x: i32, y: i32,
+        w: i32, h: i32) {
+    let tt = t.scale;
+    let Some(view) = t.view.as_ref().filter(|_| tt != 0) else { return };
+    let Some(rect) = blit_rect(tt, t.size, from, sx, sy, x, y, w, h) else { return };
     let (gpu, layout, pipe, dummy) = (kit.gpu, kit.blit_layout, kit.blit_pipe, kit.dummy_view);
     let bind = group(gpu, layout, &[view_entry(0, source), view_entry(1, dummy)]);
-    rect_pass(kit, view, t.size, pipe, map, &bind, (x as u32).wrapping_mul(tt), (y as u32).wrapping_mul(tt),
-              (w as u32).wrapping_mul(tt), (h as u32).wrapping_mul(tt));
+    rect_passes(kit, view, t.size, pipe, &bind, &[rect]);
 }
 
 /// native_grow_depth: a Z surface's old contents (`from`, `size`) drawn into its new, larger
@@ -385,6 +441,9 @@ impl Surfaces {
             scratch: None,
             scratch_size: [0, 0],
             import: None,
+            atlas: None,
+            pending: Vec::new(),
+            pending_target: 0,
             fill: None,
         }
     }
@@ -402,6 +461,10 @@ impl Surfaces {
         if self.scratch.is_some() {
             count += 1;
             bytes += px(self.scratch_size);
+        }
+        if self.atlas.is_some() {
+            count += 1;
+            bytes += px([ATLAS_PAGES * IMPORT_SIDE; 2]);
         }
         crate::memory::set(crate::memory::Part::Surfaces, count, bytes);
     }
@@ -532,6 +595,53 @@ impl Surfaces {
         self.import.is_some()
     }
 
+    /// The import atlas, made on first use; false when it could not be.
+    fn atlas_texture(&mut self, gpu: &Gpu) -> bool {
+        if self.atlas.is_none() {
+            let side = ATLAS_PAGES * IMPORT_SIDE;
+            match new_texture(gpu, side, side, wgpu::TextureFormat::Rgba8Unorm,
+                              wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                              "native import atlas") {
+                Ok(t) => {
+                    self.atlas = Some(t);
+                    self.publish();
+                }
+                Err(e) => crate::host::log(&e),
+            }
+        }
+        self.atlas.is_some()
+    }
+
+    /// Whether upscaled IMPORT pages wait in the atlas (`import`); render.rs draws them
+    /// (`flush_imports`) before any other command and at the picture's end.
+    pub fn importing(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    /// The pages waiting in the atlas drawn into their surface, in order, in one pass: one bind
+    /// group and one pass for a run of IMPORT pages instead of a copy, a group and a pass each
+    /// (finding 281). The same blit with the same constants but the source's offset, so the same
+    /// pixels.
+    pub fn flush_imports(&mut self, kit: &mut Kit) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let t = &self.list[self.pending_target];
+        let tt = t.scale;
+        let (Some(view), Some((_, atlas))) = (t.view.as_ref().filter(|_| tt != 0 && !t.depth), self.atlas.as_ref())
+        else {
+            self.pending.clear();
+            return;
+        };
+        let rects: Vec<Rect> = self.pending.drain(..).filter_map(|p| {
+            let (ax, ay) = ((p.slot % ATLAS_PAGES * IMPORT_SIDE) as i32, (p.slot / ATLAS_PAGES * IMPORT_SIDE) as i32);
+            blit_rect(tt, t.size, 1, ax, ay, p.x, p.y, p.w, p.h)
+        }).collect();
+        let (gpu, layout, pipe, dummy) = (kit.gpu, kit.blit_layout, kit.blit_pipe, kit.dummy_view);
+        let bind = group(gpu, layout, &[view_entry(0, atlas), view_entry(1, dummy)]);
+        rect_passes(kit, view, t.size, pipe, &bind, &rects);
+    }
+
     /// A COPY, IMPORT or ALPHA_UPLOAD command (`pixels`: `Picture::pixels` of it); the counts go
     /// to `out`. False for any other kind (nothing done).
     pub fn transfer(&mut self, kit: &mut Kit, k: &DhdrCommand, pixels: Option<&[u32]>, out: &mut DhdrPictureResult)
@@ -631,15 +741,25 @@ impl Surfaces {
                 }
             }
         } else if k.w <= IMPORT_SIDE as i32 && k.h <= IMPORT_SIDE as i32 {
-            if let Some(p) = pixels.filter(|_| self.import_texture(kit.gpu)) {
-                let (import, import_view) = self.import.as_ref().expect("made above");
-                let (w, h) = (k.w as u32, k.h as u32);
-                let (offset, stride) = kit.arenas.upload(p, w, h);
-                if let Some(buffer) = kit.arenas.upload_buffer() {
-                    kit.encoder.copy_buffer_to_texture(upload_source(buffer, offset, stride, h), at(import, 0, 0),
-                                                       extent(w, h));
+            // Into the atlas; drawn with the rest of its run (`flush_imports`).
+            if let Some(p) = pixels {
+                let full = self.pending.len() as u32 == ATLAS_PAGES * ATLAS_PAGES;
+                if !self.pending.is_empty() && (self.pending_target != ti || full) {
+                    self.flush_imports(kit);
                 }
-                blit(kit, import_view, 1, 0, 0, &self.list[ti], k.x, k.y, k.w, k.h);
+                if self.atlas_texture(kit.gpu) {
+                    let (atlas, _) = self.atlas.as_ref().expect("made above");
+                    let slot = self.pending.len() as u32;
+                    let (ax, ay) = (slot % ATLAS_PAGES * IMPORT_SIDE, slot / ATLAS_PAGES * IMPORT_SIDE);
+                    let (w, h) = (k.w as u32, k.h as u32);
+                    let (offset, stride) = kit.arenas.upload(p, w, h);
+                    if let Some(buffer) = kit.arenas.upload_buffer() {
+                        kit.encoder.copy_buffer_to_texture(upload_source(buffer, offset, stride, h),
+                                                           at(atlas, ax, ay), extent(w, h));
+                    }
+                    self.pending.push(Pending { x: k.x, y: k.y, w: k.w, h: k.h, slot });
+                    self.pending_target = ti;
+                }
             }
         }
         out.imports += 1;

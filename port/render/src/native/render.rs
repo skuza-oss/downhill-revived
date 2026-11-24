@@ -788,6 +788,9 @@ impl Native {
         for (i, k) in p.commands.iter().enumerate() {
             let cut_due = cut_at.is_some_and(|at| work >= at);
             work += encode_work(k, &mut last_pass);
+            if k.kind != DHDR_CMD_IMPORT && self.surfaces.importing() {
+                self.flush_imports(v.shared);
+            }
             match k.kind {
                 DHDR_CMD_ALPHA_UPLOAD => {
                     if let Some(v) = versions.get_mut(k.target as usize) { *v += 1; }
@@ -1015,6 +1018,20 @@ impl Native {
                 if let Some(v) = versions.get_mut(k.depth as usize) { *v += 1; }
             }
         }
+        if self.surfaces.importing() {
+            self.flush_imports(v.shared);
+        }
+    }
+
+    /// Upscaled IMPORT pages waiting in surfaces.rs's atlas drawn in one pass
+    /// (`Surfaces::flush_imports`, finding 281), before the next other command and at the
+    /// picture's end.
+    fn flush_imports(&mut self, shared: &NativeShared) {
+        let gpu = self.gpu;
+        self.pass.end_reason("import");
+        let (encoder, _) = self.pass.split(gpu);
+        let mut kit = Kit::new(gpu, &self.objects, shared, &mut self.arenas, encoder);
+        self.surfaces.flush_imports(&mut kit);
     }
 
     /// A COPY, IMPORT or ALPHA_UPLOAD through surfaces.rs (`Surfaces::transfer`, which counts
