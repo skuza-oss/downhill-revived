@@ -112,6 +112,9 @@ uint16_t menu_custom_legend_hit(const int widths[3], int x, int y);
 /* A tap at x beside a line whose words span [left, right): Left left of them, Right right of them, 0 on
    them (menu_pads.c, finding 268). left == right: the line's two halves. */
 uint16_t menu_side_button(int x, int left, int right);
+/* A value row whose value is a number (a volume): its text ends in a digit, spaces and tabs aside
+   (menu_pads.c, finding 282). */
+int menu_value_is_number(const char *text);
 
 /* ---- drawing, for a page that lays itself out (in its draw) ----
    In the popup's view, x across 0..640 and y down 0..224 as the rows are (menu_draw_size),

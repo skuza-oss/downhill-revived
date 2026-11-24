@@ -61,7 +61,8 @@ def popups(text):
             elif not after.startswith('  '):
                 break
         out.append(dict(vtable=m.group(2), count=int(m.group(3)), cursor=int(m.group(4)), x=int(m.group(5)),
-                        y=int(m.group(6)), step=int(m.group(7)), left=m.group(8) == '1', rows=rows))
+                        y=int(m.group(6)), step=int(m.group(7)), left=m.group(8) == '1', rows=rows,
+                        picker=line.rstrip().endswith(' picker')))
     return out
 
 

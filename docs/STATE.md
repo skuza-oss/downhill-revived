@@ -141,7 +141,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   every screen that draws it, a mouse click too; the touch camera button is the game's camera
   (SELECT, and on its lift the next view, a step only the game's camera takes, never the rider's Up,
   the air pitch's input; SELECT alone with another button; only the bar of the picture on screen
-  counts; finding 277).
+  counts; finding 277). A game popup that draws one row between ◂ ▸ (a picker: ADD TRACK's songs,
+  its drawer `D_00287308`) takes a tap left or right of that row as Left / Right and on it as Cross;
+  one with its own Left / Right slots (AUDIO / OTHER) takes a row tap as the cursor there and, for a
+  row whose value is no number (a switch), Right, never Cross, its keep-and-close (finding 282).
 - The disc image's own check is one for every platform (`port/host/disc_check.c`, from host.c's
   `disc_problem`: ISO 9660, SYSTEM.CNF booting SCUS_971.77, the whole declared volume), then the
   game's data check in the core. Desktop launcher uses a Rust file-reader FFI adapter; Android's

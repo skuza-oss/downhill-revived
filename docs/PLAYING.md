@@ -93,7 +93,12 @@ What works today:
   (BACK, SELECT, MUSIC PLAYLIST > CUSTOM's MODIFY, the playlist editor's ADD, CHANGE, DELETE) and
   beside a row for left/right (a volume). Pause (or Back) goes back one page, and on the pause
   menu itself goes on with the race; RESUME in the game's menu does too. In the playlist editor a
-  tap on a song puts the cursor there and a second tap is SELECT (it saves and leaves). The camera's flight over the track
+  tap on a song puts the cursor there and a second tap is SELECT (it saves and leaves). A page that
+  shows one choice between ◂ ▸ (the playlist's lists, ADD TRACK's songs): tap left or right of it
+  for the previous or next, and on it to choose the one shown. In OPTIONS > AUDIO / OTHER a tap on
+  a switch (Vibration, Stereo Sound, ...) changes it and a tap on a volume chooses it (tap beside it
+  to change it); the legend's SELECT keeps the changes and leaves, while BACK, Pause or Back leave
+  and put back the volumes, Vibration and Stereo Sound the page opened with, as △ does on a pad. The camera's flight over the track
   before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
   OPTIONS > VIDEO CLIPS) and the title's attract demo have a **SKIP** button (low under your right
   thumb, the left one with Hand: Left; the touch controls' START); tap it as you would press START on a pad. In a race's

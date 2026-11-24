@@ -6,6 +6,7 @@
    d-pad comes as the stick (a generic USB pad in its digital mode) not at all (issue #103,
    finding 250). */
 #include "hle.h"
+#include <string.h>
 #include "menu_page.h"
 
 int func_00220230(int port);           /* the buttons held on a pad (0 when none is there) */
@@ -99,6 +100,17 @@ uint16_t menu_custom_legend_hit(const int widths[3], int x, int y)
             return buttons[k];
     }
     return 0;
+}
+
+/* A value row whose value is a number ("Music Volume:\t\t 50 "): its last character other than a
+   space or tab is a digit. A tap on such a row of a value page only chooses it (finding 282); NULL
+   or a word value ("Vibration:\t\tOFF") is not one. */
+int menu_value_is_number(const char *text)
+{
+    if (!text) return 0;
+    const char *end = text + strlen(text);
+    while (end > text && (end[-1] == ' ' || end[-1] == '\t')) end--;
+    return end > text && end[-1] >= '0' && end[-1] <= '9';
 }
 
 /* What a tap beside a line of a menu presses (finding 268): left of its words [left, right) Left, right
