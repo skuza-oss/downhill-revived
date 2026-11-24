@@ -267,7 +267,24 @@ async function appHandlers() {
   }
 }
 
+// The rows a platform's caps give (finding 284): Stick on a touch device's Touch tab, dimmed while
+// the D-pad steers, as the game's TOUCH CONTROLS page dims it.
+function capsRows() {
+  const page = pageWithApp(async () => new Promise(() => {}));
+  const rowsOf = (caps, tab) => JSON.parse(vm.runInContext(`caps = new Set(${JSON.stringify(caps)});
+    JSON.stringify((TABS.find(([k]) => k === '${tab}') || [0, []])[1].filter((r) => !r.needs || has(r.needs)).map((r) => r.key || r.label))`, page));
+  const touch = rowsOf(['touch-settings'], 'touch');
+  assert.deepStrictEqual(touch.slice(0, 4), ['touch_preset', 'touch_hand', 'touch_steer', 'touch_stick'], 'Stick after Steer With');
+  assert.ok(!rowsOf(['window', 'pc-settings'], 'touch').includes('touch_stick'), 'no Touch rows on a PC');
+  const alive = (steer) => vm.runInContext(`state.settings = { touch_steer: '${steer}' };
+    TABS.find(([k]) => k === 'touch')[1].find((r) => r.key === 'touch_stick').when()`, page);
+  assert.strictEqual(alive('stick'), true);
+  assert.strictEqual(alive('tilt'), true);
+  assert.strictEqual(alive('dpad'), false, 'dimmed while the D-pad steers');
+}
+
 (async () => {
+  capsRows();
   await gateAlone();
   await tauri();
   await android();

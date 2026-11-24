@@ -51,6 +51,9 @@ const TABS = [
     { key: 'touch_preset', label: 'row.touchPreset', hint: 'row.touchPreset.hint', type: 'seg', needs: 'touch-settings' },
     { key: 'touch_hand', label: 'row.touchHand', hint: 'row.touchHand.hint', type: 'seg', needs: 'touch-settings' },
     { key: 'touch_steer', label: 'row.touchSteer', hint: 'row.touchSteer.hint', type: 'seg', needs: 'touch-settings' },
+    // the steering stick (issue #127): dimmed while the D-pad steers, as the game's TOUCH CONTROLS page dims it
+    { key: 'touch_stick', label: 'row.touchStick', hint: 'row.touchStick.hint', type: 'seg', needs: 'touch-settings',
+      when: () => get('touch_steer') !== 'dpad', offHint: 'row.touchStick.off' },
     { key: 'touch_size', label: 'row.touchSize', hint: 'row.touchSize.hint', type: 'select', needs: 'touch-settings' },
     { key: 'touch_style', label: 'row.touchStyle', hint: 'row.touchStyle.hint', type: 'seg', needs: 'touch-settings' },
     { label: 'row.touchEdit', hint: 'row.touchEdit.hint', type: 'action', button: 'row.touchEdit.button', icon: 'i-pencil',

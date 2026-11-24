@@ -75,7 +75,8 @@ What works today:
   settings as on Android, from an unsigned app you sideload yourself (see [Installing](#installing));
   every online race, as on the PC. The iOS port was first made by Gustavo Ribeiro (`ribeirogustav`).
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
-  or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: every kind of race, as on the PC
+  or Thumb zones; **Steer With** the stick, tilt or a D-pad; the steering **Stick** Floating, where
+  your thumb lands, the default, or Fixed, where the layout puts it), or a controller. Online: every kind of race, as on the PC
   (Quick Race, public, private and P2P races). The game's
   The words of the legend at the bottom of the menus (PREV, NEXT, INFO, SELECT, BACK) are buttons:
   tap one and it does what that pad button does there (a mouse click does the same on the PC). The
@@ -184,7 +185,7 @@ Neither is signed.
 from your browser or file manager when Android asks; the app is not on Google Play. The app opens
 on its launcher, the same as the PC's: choose your `.iso` there (it is copied into the app once, a
 few GB), change the settings that are fiddly in the game (resolution, frame rate, Performance mode,
-Native VU, widescreen, the touch layout, hand, steering and size, your rider name), then press PLAY.
+Native VU, widescreen, the touch layout, hand, steering, stick and size, your rider name), then press PLAY.
 Its **Edit the touch layout** (Settings > Touch) opens the touch layout editor on its own; DONE
 saves your layout and brings you back to the launcher. It works upright too; the game itself plays
 sideways. To skip it, turn off Settings > Game > **Open
