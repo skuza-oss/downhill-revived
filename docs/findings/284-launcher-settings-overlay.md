@@ -90,15 +90,26 @@ change is needed for that case.
   existing variable `DHD_WGPU_BACKEND`, which as for every setting wins over dhd.ini. The
   launcher row needs a new capability, `graphics-api`, which only the Windows launcher reports.
 - #129 fallback: in Rust (`device::init`): the renderer latches a failed device for the process,
-  so C cannot retry after it. A Vulkan that finds no adapter, cannot make its device, or finds only
-  a software adapter (when WARP was not asked for) is retried on Direct3D 12 with one log line.
+  so C cannot retry after it. A Vulkan that finds no adapter, cannot make its device, finds only
+  a software adapter (when WARP was not asked for), or cannot present to the game's window is
+  retried on Direct3D 12 with one log line. The window check comes before the device is installed:
+  C passes the game's window with the device descriptor (`DhdrDeviceDesc.window`), and Rust makes
+  a surface on it with RGBA8 or BGRA8 and configures it to the window's size, then drops it.
+  `DHD_TEST_VULKAN_NO_SURFACE=1` (tests only) fails that check.
   `DHDR_FEAT_VULKAN` (ABI 5) tells C which one runs; C sets `DHD_GRAPHICS_API_RUNNING` for the
   settings page.
 - #129 in the game: REVIVED SETTINGS shows Graphics API, a "needs a restart" row like Resolution,
   Font, Frame Rate and V-Sync. It sits on the Display tab after V-Sync, because the Graphics tab
   is full (ten rows with the Performance heading). It shows only where the host says which API
-  runs (Windows), and it shows that API: after a fallback it reads Direct3D 12, with the hint
-  "Vulkan did not start here: dhd.log says why".
+  runs (Windows). Its choice is the saved one (`DHD_WGPU_BACKEND`), kept apart from the API that
+  runs: after a fallback it reads "Vulkan *" with the hint "Vulkan did not start here: dhd.log says
+  why", and Undo puts the saved choice back (review: it used to show the running API, so a step and
+  Undo wrote `dx12`).
+- `dhdr_device_init` checks the descriptor's size and ABI version before it reports a device that
+  exists: the browser makes the device (`dhdr_web_init`) before the core's first call, so a core
+  and renderer of two ABI versions used to pass (review; older than this lane).
+- The launcher's dimmed segmented rows (Stick with the D-pad) have disabled buttons that save
+  nothing (review).
 - #127: the launcher's Stick row is dimmed while the D-pad steers, as the game's page dims it. The
   default stays Floating (the settings crate's, unchanged).
 
@@ -154,10 +165,24 @@ Proof on this PC (RTX 3070; hidden desktop, untimed):
 - `DHD_BUILD_SLOTS=2 python tools/check.py port -j 4`: OK (every step); `check.py docs`: OK.
 - State traces against the base build: `boot` and `race`, `state_diff.py` PASS for both.
 
+Review round (same checks again, all OK, traces PASS against the base):
+- Undo: dhd.ini `graphics_api = vulkan`, no Vulkan driver loadable (Direct3D 12 runs), REVIVED
+  SETTINGS > Display: the row reads `Vulkan *` with "Vulkan did not start here: dhd.log says why";
+  one step writes `dx12`, Undo writes `vulkan` back (the build before the fix wrote `dx12`).
+- The window check: `graphics_api = vulkan` with a working driver passes it and runs on Vulkan;
+  with `DHD_TEST_VULKAN_NO_SURFACE=1` the log says `gs: Vulkan could not start (NVIDIA GeForce
+  RTX 3070 cannot present to the game's window: ...); the game runs on Direct3D 12 instead ...`,
+  the game runs on Dx12 and the editor's picture equals the plain Direct3D 12 run's byte for byte.
+  A bad value and a Vulkan with no driver still take Direct3D 12 as before.
+- `device_smoke` `exact_device_global_init`: after the device exists, a descriptor of another ABI
+  or size gets 0; the same test fails against the old order (`another ABI`, 1 instead of 0).
+  `abi_layout` and the device unit tests pass; the wasm32 renderer compiles
+  (`rustgs.py check --target wasm32-unknown-unknown`).
+- The launcher's `capsRows` test clicks the dimmed Stick row's buttons: disabled, nothing saved
+  (it fails against the old `app.js`).
+
 Unproven: the overlay fix on the phone. The cause is inferred from the picture and the code (no
 public report of the driver fault). The next picture from that phone with this build should show
 whole rectangles, discs and rings; if it still shows triangles, the fault is not the array (the
 next suspects: the instance-rate attributes, or the triangle list's second triangle being
-dropped), and the log's `gs: GPU ... driver ...` line and `touch overlay:` lines go with it. A
-Vulkan that starts but cannot make its window surface on Windows is not covered by the fallback
-(the device exists by then); no such case is known.
+dropped), and the log's `gs: GPU ... driver ...` line and `touch overlay:` lines go with it.
