@@ -33,7 +33,7 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
   unit tests (all pass)
 - [x] 2026-11-24: the host's `touch: controls` and `touch: editor bar` lines, the desktop's cutout
   and strips for checks, `touch_layout_check.py`, PLAYING.md and TESTING.md
-- [ ] the checks on the built game (Result)
+- [x] 2026-11-24: the checks on the built game (Result)
 
 ## Decisions
 
@@ -90,4 +90,25 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
 
 ## Result
 
-To be filled in at the merge.
+On the lane's build (Windows, hidden desktop, 2026-11-24):
+
+- `test_touch`: all pass (the six in both hands, sliding, migration, hidden controls, the editor's
+  HIDE with UNDO, REDO, DONE and RESET, the editor alone, the bar on three phone shapes).
+- `touch_layout_check.py`: shoulders PASS (L1 0400, L2 0100, L1+L2 0500, R1 0800, R2 0200, R1+R2
+  0a00, nothing else sent); hide PASS (`classic.layout=2;classic.r1r2=...,hide;classic.l3=...,hide`,
+  then only R1+R2 after L3's ghost was shown; in the race R1+R2's place sent nothing and L3 sent
+  0002; RESET left `touch_edits` empty and nothing hidden); pictures PASS (20:9 and the Mi 11i's
+  shape with its cutout, either hand: no control by the cutout).
+- `touch_continue_check.py`, `touch_left_right_check.py`, `touch_pause_check.py`,
+  `touch_legend_check.py`: PASS.
+- Boot (600 fields) and race (5000 fields) state traces: every row equal to the base build's
+  (aded9f56).
+- `check.py quick` and `check.py docs`: OK.
+
+Not proven on a real phone (none was connected): how the six feel under a thumb (17 x 6.4 mm, 3.2
+mm apart, the 1.9 mm strip between L1 and L2 that is neither's), the HIDE taps on a touch screen
+(the checks post mouse clicks through `DHD_TOUCH_MOUSE`), the places against a real cutout and
+gesture strips (given to the desktop by `DHD_TOUCH_STRIPS_MM` / `DHD_TOUCH_CUTOUT_MM`), and the
+launcher's "Edit the touch layout" on the phones: Android starts the editor alone (`--touch-editor`,
+the path the check runs on Windows), iOS opens the same editor over the menus
+(`DHD_TOUCH_EDIT_AT_START`); both are `touch.c`'s editor, with HIDE, but neither ran on a device.
