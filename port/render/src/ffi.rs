@@ -18,7 +18,16 @@ use std::ffi::{c_char, c_void};
 use std::sync::Arc;
 
 fn log_err(export: &str, message: &str) {
+    log_err_asked(export, message, 0);
+}
+
+/// `log_err`, and for an out-of-memory error the memory line (`crate::memory::failed`, finding
+/// 281) with the bytes asked (0: not known).
+fn log_err_asked(export: &str, message: &str, asked: u64) {
     crate::host::log(&format!("dhd_render: {export}: {message}"));
+    if message.to_ascii_lowercase().contains("out of memory") {
+        crate::memory::failed(export, asked);
+    }
 }
 
 fn gpu_or_log(export: &str) -> Option<&'static crate::device::Gpu> {
@@ -501,7 +510,7 @@ pub unsafe extern "C" fn dhdr_texture_create(rgba: *const u32, w: u32, h: u32) -
     match Tex::create(gpu, rgba, w, h) {
         Ok(t) => crate::native::texture_handle(Arc::new(t)),
         Err(e) => {
-            log_err(E, &e);
+            log_err_asked(E, &e, w as u64 * h as u64 * 4);
             std::ptr::null_mut()
         }
     }

@@ -191,6 +191,7 @@ static int native_init(Gs *g, Web *exact)
 {
     double start;
     Native *n = native_create_rust(exact, 0, &start);   /* memory unknown; the sharp font's replacements (no texture packs) */
+    if (n) n->texture_budget = native_texture_budget(0);   /* memory unknown: 256 MiB */
     if (!n) return 0;
     fprintf(stderr, "gs native: WebGPU shaders and pipelines built in %.2f s\n", host_wall_seconds() - start);
     native_install(g, exact, n, "WebGPU (browser)");

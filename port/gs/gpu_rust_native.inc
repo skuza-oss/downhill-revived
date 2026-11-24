@@ -187,6 +187,9 @@ static int native_init(Gs *g, Rust *exact)
 #endif
     Native *n = native_create_rust(exact, scale_memory, &start);
     if (!n) return 0;
+    n->texture_budget = native_texture_budget((uint64_t)SDL_GetSystemRAM());
+    fprintf(stderr, "gs native: decoded textures: up to %llu MiB (%d MiB of memory)\n",
+            (unsigned long long)(n->texture_budget >> 20), SDL_GetSystemRAM());
     /* A texture pack (dhd.ini texture_pack, textures): its default budget is half the card's memory. */
     n->texpack = texpack_open(&n->replace, device.memory);
     /* What PC SETTINGS > Resolution offers (pc_settings.c reads it; 4 without this renderer). */

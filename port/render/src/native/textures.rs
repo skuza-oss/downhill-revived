@@ -27,6 +27,8 @@ pub struct Tex {
     w: u32,
     h: u32,
     levels: u32,
+    /// Its bytes in the renderer's totals (`crate::memory`) while it lives.
+    _held: crate::memory::Held,
 }
 
 impl Tex {
@@ -46,7 +48,8 @@ impl Tex {
             write_level(gpu, &texture, 0, bytes, w, h);
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             let group = shared.texels_group(gpu, &view, "native texture");
-            Tex { texture, view, groups: Box::new([group]), w, h, levels: 1 }
+            let _held = crate::memory::Held::new(crate::memory::Part::Textures, count as u64 * 4);
+            Tex { texture, view, groups: Box::new([group]), w, h, levels: 1, _held }
         })
     }
 
@@ -73,7 +76,8 @@ impl Tex {
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             let groups: Vec<_> =
                 shared.replace.iter().map(|s| shared.group(gpu, &view, s, "native replacement")).collect();
-            Tex { texture, view, groups: groups.into_boxed_slice(), w, h, levels }
+            let _held = crate::memory::Held::new(crate::memory::Part::Textures, total as u64);
+            Tex { texture, view, groups: groups.into_boxed_slice(), w, h, levels, _held }
         })
     }
 
