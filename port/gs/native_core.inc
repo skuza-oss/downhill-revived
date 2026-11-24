@@ -275,6 +275,9 @@ typedef struct Native {
        (native_texture_trim, finding 281): set from the device's memory (native_init), 0 none. */
     uint64_t texture_bytes, texture_budget;
     uint64_t texture_trims, texture_trimmed;
+    /* 1 + the field in which a routine trim could not get under its mark: what no queued field uses
+       is gone, and nothing gets older before the next field, so no further scan until then. */
+    uint64_t texture_trim_spent;
     int texpack;                       /* a texture pack is open (texpack.c) */
     int replace_on;                    /* replacements can be drawn (their samplers exist) */
     uint64_t replaced_draws;
@@ -841,7 +844,10 @@ static NativeTexture *native_decode(Native *n, Gs *g, unsigned ctxt, uint64_t te
     victim->key = key; victim->used = n->field;
     victim->bytes = w * h * 4;
     n->texture_bytes += victim->bytes;
-    if (n->texture_budget && n->texture_bytes > n->texture_budget) native_texture_trim(n, n->texture_budget / 4 * 3);
+    if (n->texture_budget && n->texture_bytes > n->texture_budget && n->texture_trim_spent != n->field + 1) {
+        native_texture_trim(n, n->texture_budget / 4 * 3);
+        if (n->texture_bytes > n->texture_budget / 4 * 3) n->texture_trim_spent = n->field + 1;
+    }
     victim->pack = pack; victim->pack_checked = sharp && n->texpack;
     n->stats.decoded++; n->stats.decoded_texels += (uint64_t)w * h;
     return victim;
