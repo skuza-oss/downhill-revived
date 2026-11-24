@@ -22,8 +22,9 @@ traces equal to the base build's. Out of scope: gameplay, the pad and the keyboa
 
 ## Progress
 
-- [x] 2026-11-24: both causes, on the code and in hidden runs (What was true); the fix
-- [ ] the check tool, the existing checks, state traces, the checks
+- [x] 2026-11-24: both causes, on the code and in hidden runs (What was true); the fix (e0573986)
+- [x] 2026-11-24: `touch_menu_taps_check.py`, the existing touch checks, state traces, the checks
+  (Result)
 
 ## What was true
 
@@ -69,4 +70,48 @@ the tapped row unless the cursor is on the first.
 
 ## Surprises
 
+- The issue's wrong songs were never about scrolling or the two editor columns: ADD TRACK has no
+  list on screen at all, one song between arrows; the first add of the old check (finding 274's
+  `touch_pause_check.py`, "a tap on the first song adds it") passed only because the cursor starts
+  on row 0.
+- AUDIO / OTHER's Triangle puts back the volumes, Vibration and Stereo Sound the page opened with
+  (`func_0015E6E0` keeps them at +0x510..+0x520, `func_0015F038` restores them); Stretchy Mode and
+  Sparky Tricks stay. So Pause, Android Back and the legend's BACK leave without the sound changes,
+  as △ does on a pad, and the legend's SELECT keeps them. Unchanged (the game's own behaviour);
+  `docs/PLAYING.md` says it.
+- MUSIC PLAYLIST itself (SET 1-4, RANDOM, CUSTOM, NO LIST; vtable `D_00287B20`) is a list, not a
+  picker: its row taps were right and stay so. The front end's OPTIONS has no MUSIC PLAYLIST row
+  (REVIVED SETTINGS, CONTROLS, DIFFICULTY, AUDIO / OTHER, VIDEO CLIPS, POSTERS, PICKUP EDITOR,
+  LOAD / SAVE GAME DATA, LOAD REPLAY); CONTROLS ("SELECT CONTROL OPTIONS") and DIFFICULTY are shell
+  screens (13 and 19, finding 092's `shell_mouse`), not popups, so neither rule touches them. The
+  CODES page is the touch overlay's own (finding 189), not a game page.
+- A long song's words ("Melissa "Do You Wanna Fly?"") reach 150 view pixels right of the middle: a
+  tap there is on the words (Cross), as it should be; the check taps near the view's edges.
+
 ## Result
+
+Commits on `fix/touch-menu-taps`: the lane plan; the fix (`menu_page.c`, `menu_pads.c`
+`menu_value_is_number`, a `test_menu_pads` case); the check tool, the picker mark in the popup trace
+(`... align 0/0 picker`, `picker shows row N: <text>`), `docs/PLAYING.md`; this result.
+
+- Unit test: `test_menu_pads` (a value row with a number, with tabs and trailing spaces as the
+  trace shows them, is a number; ON / OFF, empty and NULL are not).
+- Hidden runs (`port/tools/touch_menu_taps_check.py`, 1600x720 at 20:9, `DHD_TOUCH_MOUSE=1`, no
+  controller): `audio` PASS: the front end's AUDIO / OTHER, a tap on each row: Vibration OFF → ON,
+  Stereo Sound ON → OFF, Music / Speech / SFX Volume chosen with their values unchanged, the page
+  open after each; the legend's SELECT closes it and it opens again with the changed values. The
+  base build: FAIL at the first row (`a tap on 'Vibration: OFF' closed AUDIO / OTHER`). `pause` PASS:
+  a race, Pause, MORE, OPTIONS: the same five rows over the race, the legend's BACK; MUSIC PLAYLIST,
+  CUSTOM, USER 1, MODIFY, then ADD TRACK three times: the first song shown (1 Louder "In
+  Traction", the reporter's own case, which the base build answered with Krush "Survive"), after five
+  taps right of the line and one left (row 4, Goddess "You'll See"), and the last (row 22, The
+  Herbaliser "Time 2 Build"): each time the editor got the song shown and only it.
+- Existing checks on this build: `touch_continue_check.py`, `touch_left_right_check.py`,
+  `touch_pause_check.py`, `touch_legend_check.py`: PASS.
+- State traces: boot (600 fields) and race (5000) equal to the base build's (aded9f56, built here).
+- `check.py quick`, `check.py docs`: OK.
+- Not run: a phone (none connected). Unproven on a real phone: the taps at a phone's own aspect and
+  density (the same view mapping as every menu tap, findings 266-277), AUDIO / OTHER's pause page in
+  a mode where it has Stretchy Mode and Sparky Tricks (their switches go through the same slot,
+  `func_0015ED18`, as Vibration and Stereo Sound), the game's other pickers (`D_00285618`,
+  `D_00288238`, `D_00287D98`; the same rule, not driven here).
