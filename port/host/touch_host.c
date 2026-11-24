@@ -213,6 +213,10 @@ static void screen_update(SDL_Window *window)
         float per_mm = 96.0f * (scale > 0 ? scale : 1) / 25.4f;
         s.width = w / per_mm, s.height = h / per_mm;
     }
+    /* a phone's gesture strips and camera cutout band, for the desktop's checks (docs/TESTING.md) */
+    const char *strips = getenv("DHD_TOUCH_STRIPS_MM"), *cut = getenv("DHD_TOUCH_CUTOUT_MM");
+    if (strips) sscanf(strips, "%f,%f,%f,%f", &s.strip_left, &s.strip_top, &s.strip_right, &s.strip_bottom);
+    if (cut && sscanf(cut, "%f,%f", &s.cut_x0, &s.cut_x1) == 2 && s.cut_x1 > s.cut_x0) s.cut_y0 = 0, s.cut_y1 = s.height;
 #endif
     SDL_LockMutex(lock);
     if (!screen_known || memcmp(&s, &screen, sizeof s)) {
@@ -603,6 +607,18 @@ static void configure(int log)
         if (touch_control(touch, TC_STICK, &x, &y, NULL) && touch_target(touch, TOUCH_TARGET_DPAD, 3, &ax, &ay))
             fprintf(stderr, "touch: d-pad at %.1f,%.1f mm, arms %.1f mm from it\n", x, y, ax - x);
     }
+    if (log && known) {   /* where each control is, and which are hidden (the checks tap them; finding 283) */
+        char line[1024];
+        int at = snprintf(line, sizeof line, "touch: controls");
+        for (int c = 0; c < TC_COUNT && at < (int)sizeof line - 40; c++) {
+            float x, y;
+            if (touch_control(touch, c, &x, &y, NULL))
+                at += snprintf(line + at, sizeof line - at, " %s %.1f,%.1f", touch_control_name(c), x, y);
+            else if (s.edit[s.preset == TOUCH_CLASSIC][c].hidden && touch_hideable(c))
+                at += snprintf(line + at, sizeof line - at, " %s hidden", touch_control_name(c));
+        }
+        fprintf(stderr, "%s\n", line);
+    }
     if (log && known)   /* before the window's size is known there is nothing to say */
         fprintf(stderr, "touch: %s, %s hand, %s, size %s, screen %.1f x %.1f mm (strips l %.1f t %.1f r %.1f b %.1f mm, "
                 "cutout x %.1f-%.1f mm)\n",
@@ -743,6 +759,13 @@ void host_service_touch_field(uint32_t address)
             touch_open_editor_alone(touch);
             alone_state = 1;
             fprintf(stderr, "touch: the layout editor alone is open\n");
+            static const char *const bar[] = {"ground", "air", "minus", "plus", "undo", "redo", "hide", "reset", "done"};
+            char line[512];
+            int at = snprintf(line, sizeof line, "touch: editor bar");
+            float x, y;
+            for (int b = 0; b < (int)(sizeof bar / sizeof *bar); b++)
+                if (touch_target(touch, TOUCH_TARGET_EDITOR, b, &x, &y)) at += snprintf(line + at, sizeof line - at, " %s %.1f,%.1f", bar[b], x, y);
+            fprintf(stderr, "%s\n", line);
         }
     }
     if (h->command == TOUCH_COMMAND_HINTS) {

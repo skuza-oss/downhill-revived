@@ -307,6 +307,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 280 | [input latency (issue #123): where a press waits, and what of it is ours](280-input-latency.md) | current |  |
 | 281 | [an iPhone with 3 GB closes "out of memory" from the native renderer (0.8.12)](281-ios-renderer-memory.md) | current |  |
 | 282 | [touch: AUDIO / OTHER's rows (issue #125) and the custom playlist's songs (issue #118)](282-touch-menu-taps.md) | current |  |
+| 283 | [touch: Classic's six shoulder buttons (#126) and HIDE in Edit Layout (#128)](283-touch-shoulders-hide.md) | current |  |
 | 284 | [two launcher settings (Stick, Graphics API) and the touch overlay drawn as triangles](284-launcher-settings-overlay.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

@@ -38,7 +38,8 @@ enum {
     TC_PEDAL, TC_HOP, TC_BRAKE, TC_SLIDE, TC_SQUARE, TC_CIRCLE,     /* Thumb zones (◻ ○: Buttons mode) */
     TC_CAMERA, TC_PAUSE,                                            /* both presets' top buttons */
     TC_CROSS, TC_TRIANGLE, TC_CSQUARE, TC_CCIRCLE, TC_PLUS_LEFT, TC_PLUS_RIGHT,  /* Classic */
-    TC_LBAR, TC_RBAR, TC_L3, TC_R3,
+    TC_L1, TC_L2, TC_L1L2, TC_R1, TC_R2, TC_R1R2,                   /* Classic's shoulders, one button each (finding 283) */
+    TC_L3, TC_R3,
     TC_STICK,                                                       /* the steering stick's home */
     TC_TRICK,                                                       /* the trick stick's faint spot */
     TC_COUNT
@@ -47,6 +48,8 @@ enum {
 typedef struct {
     float dx, dy;    /* mm from the preset's place */
     float size;      /* times the preset's size (1 = as designed; TOUCH_SIZE_MIN to TOUCH_SIZE_MAX) */
+    int hidden;      /* the layout editor's HIDE (finding 283): not drawn, takes no touch; never Pause or the
+                        steering stick (touch_hideable) */
 } TouchEdit;
 
 /* A control's own size in the layout editor (finding 226): 25 % to 600 %, where the screen holds it. */
@@ -88,7 +91,10 @@ typedef struct {
 
 void touch_settings_default(TouchSettings *s);
 /* dhd.ini touch_edits: "preset.control=dx,dy,size;..." and back (out: at least 1024 bytes); a
-   preset laid out on the current places also has "preset.layout=2" (older readers skip it). */
+   preset laid out on the current places also has "preset.layout=2" (older readers skip it). A hidden
+   control's entry ends ",hide" (older readers read the three numbers and skip the rest). Classic's
+   combined shoulder bars before finding 283 ("classic.lbar", "classic.rbar") load as their three
+   buttons each, moved and sized as the bar was. */
 void touch_layout_parse(TouchSettings *s, const char *text);
 void touch_layout_format(const TouchSettings *s, char *out, int size);
 
@@ -170,6 +176,12 @@ void touch_open_editor(Touch *t);              /* TOUCH CONTROLS > Edit layout *
 void touch_open_editor_alone(Touch *t);
 int touch_editor_open(const Touch *t);
 int touch_tablet(const Touch *t);              /* laid out with the tablet defaults */
+/* A control the layout editor's HIDE may hide: every one but Pause and the steering stick (the player
+   would be locked out) and the pieces that go with another (the trick stick's spot, Classic's +
+   spots: they hide with ✕ and their own face button). */
+int touch_hideable(int control);
+/* A control's name in dhd.ini's touch_edits ("l1", "r1r2", "pause" ...; NULL past the last). */
+const char *touch_control_name(int control);
 
 /* The host's queue between its input thread and the game's field (no lock here: the host holds
    its own). It never loses what ends a press: a finger's moves are merged (the latest kept) once
@@ -234,14 +246,18 @@ uint16_t touch_sector_buttons(int sector);
 const char *touch_trick_name(uint16_t buttons);             /* NULL: no tabled trick */
 /* Where a panel's button is (its centre, mm): the pause rows (Resume, Restart race, Quit race,
    Controls, Bail out, Codes), the question (No, Yes), the online panel (Close, Bail out, Leave race),
-   the editor's bar (Ground, Air, -, +, Undo, Redo, Reset, Done), the pause rows' CODES page (Up, Down, Left,
+   the editor's bar (Ground, Air, -, +, Undo, Redo, Hide, Reset, Done), the pause rows' CODES page (Up, Down, Left,
    Right, Triangle, Circle, Cross, Square, Clear, Back, Enter; finding 189). 0 if there is no such
    button. */
 enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR, TOUCH_TARGET_CODES,
        TOUCH_TARGET_SKIP /* the flight over the track's SKIP button, index 0 (finding 209) */,
        TOUCH_TARGET_DPAD /* the D-pad's arms: up, down, left, right (finding 214); 0 unless it steers */ };
 int touch_target(const Touch *t, int kind, int index, float *x, float *y);
-/* Where a control sits now (centre and radius, mm); 0 if the layout has none. */
+/* The layout editor's bar button b (as TOUCH_TARGET_EDITOR counts them): its centre and half sizes, mm;
+   0 when the editor is shut. */
+int touch_editor_button(const Touch *t, int b, float *x, float *y, float *hw, float *hh);
+/* Where a control sits now (centre and radius, mm); 0 if the layout has none, or it is hidden (only
+   the editor's HIDE mode, where hidden controls show as ghosts to tap, gives a hidden one). */
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);
 /* The same control's half sizes (a box's width and height; a round control's radius twice). */
 int touch_control_size(const Touch *t, int control, float *half_w, float *half_h);
