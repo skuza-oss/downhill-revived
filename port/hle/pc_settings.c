@@ -13,8 +13,9 @@
    widescreen, the texture pack, the font, the frame rate, V-Sync and the graphics API at the next
    start ("*" and the row's hint, a line above the legend, say so). Graphics API (Direct3D 12 or
    Vulkan, finding 284) is on the Display tab (Graphics has no room for an eleventh row) and only
-   where the host says which API runs (DHD_GRAPHICS_API_RUNNING: Windows' gpu_rust.c); it shows
-   the API that runs, so a Vulkan that could not start shows Direct3D 12 and its hint says why.
+   where the host says which API runs (DHD_GRAPHICS_API_RUNNING: Windows' gpu_rust.c). Its choice
+   is the one saved (DHD_WGPU_BACKEND), kept apart from the API that runs: a Vulkan that could not
+   start shows "Vulkan *" (Direct3D 12 runs), its hint says why, and Undo puts the saved choice back.
    A setting the environment sets (DHD_*) is shown but can't be changed here.
    Nothing here writes game state: the page lives in host memory and the settings in dhd.ini,
    never in the memory card's save.
@@ -167,6 +168,7 @@ void port_fx_haze(int on)
 }
 
 static int loaded;
+static int api_fell_back;  /* Vulkan was asked for at the start and Direct3D 12 runs (Graphics API's hint) */
 
 /* The largest scale the renderer draws on this GPU: DHD_SCALE_MAX, which the Rust native renderer
    sets (8, or less on a GPU with little memory or small textures); 0 without it (the exact
@@ -526,14 +528,12 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     if (r && locked(r)) {
         snprintf(hint, sizeof hint, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
         p->hint = hint;
-    } else if (r && r->selected != r->running) p->hint = restart_hint;
+    } else if (r == &rows[GRAPHICS_API] && api_fell_back && r->selected != r->running)
+        p->hint = "Vulkan did not start here: dhd.log says why";
+    else if (r && r->selected != r->running) p->hint = restart_hint;
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->hint = "No pack: see texture_pack in dhd.ini";
     else if (r == &rows[PERFORMANCE]) p->hint = "ON: the three effects below off, for speed";
-    else if (r == &rows[GRAPHICS_API]) {
-        const char *asked = host_getenv("DHD_WGPU_BACKEND"), *runs = host_getenv("DHD_GRAPHICS_API_RUNNING");
-        p->hint = asked && !dhd_stricmp(asked, "vulkan") && runs && strcmp(runs, "vulkan")
-            ? "Vulkan did not start here: dhd.log says why" : "Try Vulkan if the picture or speed is wrong";
-    }
+    else if (r == &rows[GRAPHICS_API]) p->hint = "Try Vulkan if the picture or speed is wrong";
     else if (r == &rows[SHADOWS]) p->hint = "The riders' shadows and the glow around the sun";
     else if (r == &rows[FLARE]) p->hint = "The rings across the picture from the sun";
     else if (r == &rows[PARTICLES]) p->hint = "Dust, dirt, spray and heat haze";
@@ -717,6 +717,14 @@ void port_pc_settings(void)
             current(&rows[i], value, sizeof value);
             rows[i].selected = rows[i].running = find(&rows[i], value);
         }
+        /* Graphics API: running is the API that runs (current), selected the choice saved, which
+           Undo puts back; they differ after a Vulkan that could not start */
+        Row *api = &rows[GRAPHICS_API];
+        const char *asked = api->env ? host_getenv(api->env) : NULL;
+        int saved = find(api, asked && *asked ? asked : api->builtin);
+        if (saved >= 0) api->selected = saved;
+        api_fell_back = saved >= 0 && !strcmp(api->choices[saved].value, "vulkan") && api->running >= 0 &&
+                        strcmp(api->choices[api->running].value, "vulkan");
         loaded = 1;
     }
     for (int i = 0; i < ROWS; i++) rows[i].opened = rows[i].selected;
