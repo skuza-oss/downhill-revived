@@ -1486,7 +1486,10 @@ static Box panel_box(const Touch *t, int b)
 /* The editor's buttons, in the top buttons' row (their default places: the editor moves them):
    GROUND and AIR on one side of them, - + UNDO REDO RESET DONE on the wider side (both groups
    there, GROUND and AIR first, when the other side is too narrow); b = EDIT_BUTTONS is the size
-   readout's place, under the second group. A screen too narrow for that gets one row below. */
+   readout's place, under the second group. A screen too narrow for that gets one row below, or two
+   (GROUND AIR - + UNDO REDO, then the readout and HIDE RESET DONE) when one does not fit; every row
+   inside the usable width: the gesture strips and a camera cutout's band left out (finding 283's
+   review: a 16:9 phone's one row put DONE past the screen's edge). */
 static Box editor_box(const Touch *t, int b)
 {
     /* GROUND AIR | - + UNDO REDO HIDE RESET DONE: 9 mm targets at least, G apart, narrow enough for both
@@ -1512,7 +1515,14 @@ static Box editor_box(const Touch *t, int b)
     float span0 = fminf(a0, a1) - hw - 2, span1 = fmaxf(a0, a1) + hw + 2;   /* the top buttons, a 2 mm margin */
     float group_a = w[EDIT_GROUND] + G + w[EDIT_AIR], group_b = -G;
     for (int i = EDIT_MINUS; i < EDIT_BUTTONS; i++) group_b += w[i] + G;
-    float left_room = span0 - 2, right_room = W - 2 - span1;
+    /* the usable width: [lo, hi] */
+    const TouchScreen *sc = &t->screen;
+    float lo = fmaxf(2, sc->strip_left + 1), hi = fminf(W - 2, W - sc->strip_right - 1);
+    if (sc->cut_x1 > sc->cut_x0 && sc->cut_y1 > sc->cut_y0) {
+        if (sc->cut_x1 < W / 2) lo = fmaxf(lo, sc->cut_x1 + 1);
+        else if (sc->cut_x0 > W / 2) hi = fminf(hi, sc->cut_x0 - 1);
+    }
+    float left_room = span0 - lo, right_room = hi - span1;
     int b_right = right_room >= left_room;
     float wide = b_right ? right_room : left_room, narrow = b_right ? left_room : right_room;
     int split = wide >= group_b && narrow >= group_a;
@@ -1528,13 +1538,27 @@ static Box editor_box(const Touch *t, int b)
         for (int i = EDIT_MINUS; i < b; i++) x += w[i] + G;
         return (Box){x + w[b] / 2, y, w[b] / 2, hh};
     }
-    float total = 0;
+    float total = 0, row_y = t->screen.height * 0.16f;
     for (int i = 0; i < EDIT_BUTTONS; i++) total += w[i] + 2;
     total += 28;   /* the size readout */
-    float x = (W - total) / 2;
-    if (b == EDIT_BUTTONS) b = EDIT_AIR;   /* the readout: the caller puts it beside AIR */
-    for (int i = 0; i < b; i++) x += w[i] + 2 + (i == EDIT_AIR ? 28 : 0);
-    return (Box){x + w[b] / 2, t->screen.height * 0.16f, w[b] / 2, 4.5f};
+    if (total <= hi - lo) {   /* one row */
+        float x = lo + (hi - lo - total) / 2;
+        if (b == EDIT_BUTTONS) b = EDIT_AIR;   /* the readout: the caller puts it beside AIR */
+        for (int i = 0; i < b; i++) x += w[i] + 2 + (i == EDIT_AIR ? 28 : 0);
+        return (Box){x + w[b] / 2, row_y, w[b] / 2, 4.5f};
+    }
+    /* two rows: GROUND .. REDO; under them the readout, then HIDE RESET DONE at the row's end (the
+       buttons narrower only on a screen under 73 mm across) */
+    float row1 = -2, row2 = -2;
+    for (int i = 0; i < EDIT_BUTTONS; i++) *(i < EDIT_HIDE ? &row1 : &row2) += w[i] + 2;
+    float k = fminf(1, (hi - lo) / row1);
+    if (b == EDIT_BUTTONS) {
+        float room = hi - lo - row2 * k - 2;
+        return (Box){lo + room / 2, row_y + 10.5f, room / 2, 1.5f};
+    }
+    float x = b < EDIT_HIDE ? lo + (hi - lo - row1 * k) / 2 : hi - row2 * k;
+    for (int i = b < EDIT_HIDE ? 0 : EDIT_HIDE; i < b; i++) x += (w[i] + 2) * k;
+    return (Box){x + w[b] * k / 2, b < EDIT_HIDE ? row_y : row_y + 10.5f, w[b] * k / 2, 4.5f};
 }
 
 static int in_box(Box b, float x, float y) { return fabsf(x - b.x) <= b.hw && fabsf(y - b.y) <= b.hh; }
@@ -3640,6 +3664,17 @@ static void draw_online_panel(const Touch *t, Draw *d)
     }
 }
 
+/* The editor's readout line: in its own place (beside the second group, or in the two rows' second,
+   its words fitted to it), or in one row beside AIR. */
+static void editor_readout(const Touch *t, Draw *d, const char *line)
+{
+    Box a = editor_box(t, EDIT_BUTTONS);
+    float size = 2.2f;
+    if (a.hh > 2) a = editor_box(t, EDIT_AIR), a.x += a.hw + 15;   /* one row: beside AIR */
+    else size = fminf(size, 2 * a.hw / (0.9f * (float)strlen(line)));
+    text(d, a.x, a.y, size, 0, line, rgba(255, 209, 102, 1));
+}
+
 static void draw_editor(const Touch *t, Draw *d)
 {
     float W = t->screen.width, H = t->screen.height;
@@ -3687,9 +3722,7 @@ static void draw_editor(const Touch *t, Draw *d)
              b == EDIT_DONE ? rgba(16, 32, 16, 1) : b == EDIT_HIDE && t->edit_hiding ? rgba(40, 30, 6, 1) : rgba(255, 255, 255, dim ? 0.3f : 1));
     }
     if (t->edit_hiding) {   /* HIDE mode: what a tap does, where the readout goes */
-        Box a = editor_box(t, EDIT_BUTTONS);
-        if (a.hh > 2) a = editor_box(t, EDIT_AIR), a.x += a.hw + 15;
-        text(d, a.x, a.y, 2.2f, 0, "TAP A BUTTON TO HIDE OR SHOW IT", rgba(255, 209, 102, 1));
+        editor_readout(t, d, "TAP A BUTTON TO HIDE OR SHOW IT");
     } else if (t->edit_selected >= 0 && t->ctl[t->edit_selected].on) {
         /* the selected control, its drawn size and its own size in per cent (finding 226) */
         const char *const *readout = CONTROL_NAMES;
@@ -3703,9 +3736,7 @@ static void draw_editor(const Touch *t, Draw *d)
             snprintf(info, sizeof info, "%s", name);
         else
             snprintf(info, sizeof info, "%s %.0f MM %.0f%%", name, size, edit_of((Touch *)t, t->edit_selected)->size * 100);
-        Box a = editor_box(t, EDIT_BUTTONS);
-        if (a.hh > 2) a = editor_box(t, EDIT_AIR), a.x += a.hw + 15;   /* one row: beside AIR */
-        text(d, a.x, a.y, 2.2f, 0, info, rgba(255, 209, 102, 1));
+        editor_readout(t, d, info);
     }
 }
 
