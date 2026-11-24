@@ -149,6 +149,9 @@ pub fn install_error_handler(device: &wgpu::Device) {
     device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| {
         let line = format!("dhd_render: wgpu error in {}: {e}", current_export());
         if matches!(e, wgpu::Error::OutOfMemory { .. }) {
+            // The process ends here: the memory line (finding 281) first, whatever the count of
+            // earlier failures (`memory::failed` logs only some of those).
+            crate::host::log(&crate::memory::report(&format!("a wgpu call in {}", current_export()), 0));
             out_of_memory(&line);
         }
         fatal(&line)
