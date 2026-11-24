@@ -287,6 +287,21 @@ function capsRows() {
   assert.strictEqual(alive('stick'), true);
   assert.strictEqual(alive('tilt'), true);
   assert.strictEqual(alive('dpad'), false, 'dimmed while the D-pad steers');
+  // a dimmed segmented row's buttons are disabled and save nothing, even when one is activated
+  // (a focused option the redraw put the focus back on); alive, they save
+  vm.runInContext(`globalThis.saved = [];
+    save = async (key, value) => { saved.push(key + '=' + value); };
+    state.schema = { touch_stick: { choices: [['floating', 'Floating'], ['fixed', 'Fixed']] } };
+    state.settings = { touch_steer: 'dpad', touch_stick: 'floating' };
+    globalThis.fakeEl = (tag) => ({ tag, attrs: {}, on: {}, kids: [], setAttribute(k, v) { this.attrs[k] = v; },
+      addEventListener(k, f) { this.on[k] = f; }, append(k) { this.kids.push(k); } });
+    document = { createElement: fakeEl, createElementNS: (ns, tag) => fakeEl(tag) };`, page);
+  const press = (off) => vm.runInContext(`(() => { saved = [];
+    const seg = control(TABS.find(([k]) => k === 'touch')[1].find((r) => r.key === 'touch_stick'), ${off});
+    for (const b of seg.kids) b.on.click();
+    return JSON.stringify({ disabled: seg.kids.map((b) => 'disabled' in b.attrs), saved }); })()`, page);
+  assert.deepStrictEqual(JSON.parse(press(true)), { disabled: [true, true], saved: [] }, 'a dimmed Stick row saves nothing');
+  assert.deepStrictEqual(JSON.parse(press(false)), { disabled: [false, false], saved: ['touch_stick=floating', 'touch_stick=fixed'] });
 }
 
 (async () => {

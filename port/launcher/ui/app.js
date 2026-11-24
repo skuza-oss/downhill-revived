@@ -378,8 +378,8 @@ function control(row, off) {
     case 'seg':
       return el('div', { class: 'seg', role: 'radiogroup', 'aria-label': name },
         offered().map(([v, text]) => el('button', {
-          class: v === value ? 'on' : '', role: 'radio', 'aria-checked': String(v === value), tabindex: tab,
-          onclick: () => save(row.key, v, label(text)).then(renderRows),
+          class: v === value ? 'on' : '', role: 'radio', 'aria-checked': String(v === value), tabindex: tab, disabled: off,
+          onclick: () => !off && save(row.key, v, label(text)).then(renderRows),  // a dimmed row never saves
         }, text)));
     case 'select': {
       const show = row.option || ((v, text) => text);
