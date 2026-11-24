@@ -90,12 +90,14 @@ race state traces equal to the base's. Out of scope: gameplay, Thumb zones' plac
 - **The editor's bar**: nine buttons now, 1.5 mm apart (2 before), GROUND 12, AIR 9, - 9, + 9, UNDO
   10, REDO 10, HIDE 10, RESET 11, DONE 10 mm, their words fitted to them. Classic on an iPhone with its
   island on the action side has 104 mm beside the top buttons; the bar takes 102.5. Every arrangement
-  keeps to the usable width (the gesture strips and a cutout's band left out). Too narrow for one row
-  beside the top buttons (a 16:9 phone), it takes two on their wide side: GROUND .. REDO, then HIDE
-  RESET DONE next to the top buttons and the readout beyond (its words fitted to it), a little
-  narrower (down to 3/4) on a 4-inch phone with a cutout; the old one row across (138 mm) put GROUND
-  and DONE off a 104 mm screen. The second row lies over the shoulders there; each stays partly
-  uncovered to grab. `touch_editor_button` gives a bar button's box (the tests).
+  keeps to the usable width (the gesture strips and a cutout's band left out); the old one row across
+  (138 mm) put GROUND and DONE off a 104 mm screen. Too narrow for the row beside the top buttons, the
+  row narrows, down to 0.7 (a 16:9 phone: 0.72, targets 6.5 to 8.6 mm, about the 44 pt Apple asks
+  for), over no control: a second row there lay over R1 all but a 1.4 mm strip (the picture of the
+  first try). Narrower still (a 4-inch phone), two rows on the top buttons' wide side: GROUND .. REDO,
+  then HIDE RESET DONE next to the top buttons and the readout beyond (its words fitted to it), down
+  to 3/4; the second row lies over shoulders there, each partly uncovered to grab.
+  `touch_editor_button` gives a bar button's box (the tests).
 - **The log**: the host writes `touch: controls name x,y ...` (hidden ones `name hidden`) when it
   lays the controls out, and the editor alone `touch: editor bar ...`; the checks aim with them.
   `DHD_TOUCH_STRIPS_MM` and `DHD_TOUCH_CUTOUT_MM` give the desktop a phone's strips and cutout.

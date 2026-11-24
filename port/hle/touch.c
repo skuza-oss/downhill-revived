@@ -1570,25 +1570,29 @@ static Box editor_box(const Touch *t, int b)
     int b_right = right_room >= left_room;
     float wide = b_right ? right_room : left_room, narrow = b_right ? left_room : right_room;
     int split = wide >= group_b && narrow >= group_a;
-    int together = !split && wide >= group_a + 2 + group_b;   /* both groups on the wide side */
+    /* both groups on the wide side; narrower, down to 0.7 (6.3 mm: a 16:9 phone's 74 mm there), rather
+       than a second row over the controls below */
+    float together_w = group_a + 2 + group_b, k = split ? 1 : fminf(1, wide / together_w);
+    int together = !split && k >= 0.7f;
     if (split || together) {
         float ax, bx;
         if (split) ax = b_right ? span0 - group_a : span1, bx = b_right ? span1 : span0 - group_b;
-        else if (b_right) ax = span1, bx = span1 + group_a + 2;
-        else bx = span0 - group_b, ax = bx - 2 - group_a;
-        if (b == EDIT_BUTTONS) return (Box){bx + group_b / 2, y + hh + 3.0f, group_b / 2, 1.5f};   /* under - + ... */
-        if (b <= EDIT_AIR) return (Box){ax + (b == EDIT_GROUND ? w[0] / 2 : w[0] + G + w[1] / 2), y, w[b] / 2, hh};
+        else if (b_right) ax = span1, bx = span1 + (group_a + 2) * k;
+        else bx = span0 - group_b * k, ax = bx - (2 + group_a) * k;
+        if (b == EDIT_BUTTONS) return (Box){bx + group_b * k / 2, y + hh + 3.0f, group_b * k / 2, 1.5f};   /* under - + ... */
+        if (b <= EDIT_AIR) return (Box){ax + (b == EDIT_GROUND ? w[0] / 2 : w[0] + G + w[1] / 2) * k, y, w[b] * k / 2, hh};
         float x = bx;
-        for (int i = EDIT_MINUS; i < b; i++) x += w[i] + G;
-        return (Box){x + w[b] / 2, y, w[b] / 2, hh};
+        for (int i = EDIT_MINUS; i < b; i++) x += (w[i] + G) * k;
+        return (Box){x + w[b] * k / 2, y, w[b] * k / 2, hh};
     }
     /* two rows beside the top buttons, on the wide side: GROUND .. REDO, under them HIDE RESET DONE
-       next to the top buttons and the readout beyond (a 16:9 phone: the top buttons stay clear); on a
-       4-inch phone with a cutout or a strip, a little narrower */
+       next to the top buttons and the readout beyond (a 4-inch phone: the top buttons stay clear), a
+       little narrower with its cutout or a strip */
     float row1 = -G, row2 = -G;
     for (int i = 0; i < EDIT_BUTTONS; i++) *(i < EDIT_HIDE ? &row1 : &row2) += w[i] + G;
     if (wide >= 0.75f * row1) {
-        float k = fminf(1, wide / row1), y2 = y + 2 * hh + G;
+        float y2 = y + 2 * hh + G;
+        k = fminf(1, wide / row1);
         if (b == EDIT_BUTTONS) {
             float r0 = b_right ? span1 + row2 * k + 2 : lo, r1 = b_right ? hi : span0 - row2 * k - 2;
             return (Box){(r0 + r1) / 2, y2, (r1 - r0) / 2, 1.5f};
@@ -1612,7 +1616,7 @@ static Box editor_box(const Touch *t, int b)
        across) */
     row1 = -2, row2 = -2;
     for (int i = 0; i < EDIT_BUTTONS; i++) *(i < EDIT_HIDE ? &row1 : &row2) += w[i] + 2;
-    float k = fminf(1, (hi - lo) / row1);
+    k = fminf(1, (hi - lo) / row1);
     if (b == EDIT_BUTTONS) {
         float room = hi - lo - row2 * k - 2;
         return (Box){lo + room / 2, row_y + 10.5f, room / 2, 1.5f};

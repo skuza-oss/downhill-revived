@@ -15,7 +15,7 @@ hidden desktop with touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no c
   and the next start hides nothing.
 - pictures: the default Classic layout in the editor alone, either hand, on the Mi 11i's shape (its
   cutout band on the right, a 5.2 mm top strip), on a 20:9 screen with no cutout and on a 16:9 one (an
-  iPhone SE: the bar in two rows, L1+L2 beyond its column).
+  iPhone SE: the bar in one narrower row, L1+L2 beyond its column).
 
 The touch log (DHD_TOUCH_LOG=1) says where each control is and what each touch sent. Pictures in
 OUT/<scenario>. Exit 0 when every scenario passes."""

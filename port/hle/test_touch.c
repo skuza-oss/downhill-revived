@@ -2503,7 +2503,7 @@ static void test_editor_bar_small(void)
                     float bx[9], by[9], half_w[9], half_h[9];
                     for (int b = 0; b < 9; b++) {
                         CHECK(touch_editor_button(t, b, &bx[b], &by[b], &half_w[b], &half_h[b]));
-                        CHECK(half_w[b] >= 0.75f * 4.5f && half_h[b] >= 3.0f);   /* a thumb's target still */
+                        CHECK(half_w[b] >= 0.7f * 4.5f && half_h[b] >= 3.0f);   /* a thumb's target still */
                         int inside = bx[b] - half_w[b] >= lo && bx[b] + half_w[b] <= hi && by[b] - half_h[b] >= 0 && by[b] + half_h[b] <= H;
                         if (!inside) fprintf(stderr, "test_touch: %.1f x %.1f (%d) preset %d left %d: bar button %d at %.1f,%.1f\n", W, H, v, preset, left, b, bx[b], by[b]);
                         CHECK(inside);
@@ -2519,6 +2519,16 @@ static void test_editor_bar_small(void)
                     for (int b = 0; b < 9; b++)
                         for (int d = b + 1; d < 9; d++)
                             CHECK(fabsf(bx[b] - bx[d]) >= half_w[b] + half_w[d] + 1.0f || fabsf(by[b] - by[d]) >= half_h[b] + half_h[d] + 1.0f);
+                    if (i == 0 && v == 0)   /* a 16:9 phone: one narrower row, over no control (each can be grabbed) */
+                        for (int b = 0; b < 9; b++)
+                            for (int c = 0; c < TC_COUNT; c++) {
+                                float cx, cy, hw, hh;
+                                if (c == TC_STICK || c == TC_TRICK || !touch_control(t, c, &cx, &cy, NULL)) continue;
+                                touch_control_size(t, c, &hw, &hh);
+                                int clear = fabsf(bx[b] - cx) >= half_w[b] + hw || fabsf(by[b] - cy) >= half_h[b] + hh;
+                                if (!clear) fprintf(stderr, "test_touch: 104 x 58.5 preset %d left %d: bar button %d over control %d\n", preset, left, b, c);
+                                CHECK(clear);
+                            }
                     editor_tap(E_HIDE);
                     CHECK(touch_target(t, TOUCH_TARGET_EDITOR, E_HIDE, &bx[0], &by[0]));
                     editor_tap(E_HIDE);
