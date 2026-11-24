@@ -144,7 +144,9 @@ pub unsafe extern "C" fn dhdr_device_init(d: *const DhdrDeviceDesc) -> i32 {
             }
         };
         let o = crate::device::DeviceOptions { flags: d.flags, vendor_id: d.vendor_id, device_id: d.device_id,
-                                               log_level: d.log_level, dxc_path };
+                                               log_level: d.log_level, dxc_path,
+                                               // SAFETY: a non-NULL window is a DhdrWindow (the header).
+                                               window: unsafe { d.window.as_ref() }.copied() };
         crate::device::init(&o) as i32
     }
 }

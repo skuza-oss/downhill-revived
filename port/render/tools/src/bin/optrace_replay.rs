@@ -896,6 +896,7 @@ fn device_init(d: &DeviceArgs) -> Result<(), Failure> {
         device_id: d.device_id,
         log_level: d.log_level,
         dxc_path: dxc.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+        window: std::ptr::null(),
     };
     // SAFETY: desc is a valid descriptor; dxc outlives the call.
     if unsafe { dhd_render::ffi::dhdr_device_init(&desc) } != 1 {

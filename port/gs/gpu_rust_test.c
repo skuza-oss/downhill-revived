@@ -10,14 +10,14 @@
 #include <stdint.h>
 #include "dhd_render.h"
 
-static int device_init(void);
+static int device_init(const GsWindow *window);
 
 /* port/gs/test_depth.c: raster.wgsl's depth_probe over cases (8 + 4 + 8 words each, see
    DepthCase), results as (exact, double-float) Z pairs. 1 ok; 0 no device or the probe failed
    (dhd_render logged why). */
 int gs_wgpu_depth_probe(const void *cases, unsigned count, uint32_t *results)
 {
-    if (!device_init()) return 0;
+    if (!device_init(NULL)) return 0;
     return dhdr_test_depth_probe(cases, count, results);
 }
 

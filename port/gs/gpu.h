@@ -3,8 +3,6 @@
 #ifndef PORT_GS_GPU_H
 #define PORT_GS_GPU_H
 #include "gs.h"
-/* Starts the renderer on g: 1 when it runs (g->backend set), 0 when there is no device for it. */
-int gs_gpu_init(Gs *g);
 void gs_gpu_destroy(Gs *g);
 void gs_gpu_profile(Gs *g, double seconds);
 int gs_gpu_display(Gs *g, unsigned *width, unsigned *height);
@@ -25,6 +23,9 @@ typedef struct GsWindow {
    shows the display picture, or pixels (width x height) when given, stretched over the window's
    width x height client area. */
 int gs_gpu_surface(Gs *g, const GsWindow *window);
+/* Starts the renderer on g: 1 when it runs (g->backend set), 0 when there is no device for it.
+   window: the one gs_gpu_surface will present to, or NULL (no window: tools and tests). */
+int gs_gpu_init(Gs *g, const GsWindow *window);
 /* The surface again on a new window, or none (NULL): the OS took the old one (Android, finding 091). */
 int gs_gpu_surface_reset(Gs *g, const GsWindow *window);
 /* present.c's SDL window: its drawable size in pixels (the GsWindow size it gives the renderer). */

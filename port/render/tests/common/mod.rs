@@ -63,7 +63,7 @@ pub fn options(adapter: Adapter, compiler: Compiler) -> DeviceOptions {
         }
         Compiler::Dxc => Some(dxc_path()),
     };
-    DeviceOptions { flags, vendor_id: 0, device_id: 0, log_level: DHDR_LOG_WARN, dxc_path }
+    DeviceOptions { flags, vendor_id: 0, device_id: 0, log_level: DHDR_LOG_WARN, dxc_path, window: None }
 }
 
 /// A device of the test's own (not the process's global one), kept for the process.

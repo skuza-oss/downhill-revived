@@ -61,6 +61,8 @@ typedef struct DhdrDeviceDesc {
     uint32_t vendor_id, device_id;   /* PCI ids of the presentation adapter; 0, 0: high performance */
     uint32_t log_level;              /* DHDR_LOG_*: the most verbose wgpu/naga level forwarded */
     const char *dxc_path;            /* UTF-8 path of dxcompiler.dll beside the exe, or NULL (FXC) */
+    const struct DhdrWindow *window; /* the game's window (below), or NULL: on Windows a Vulkan device
+                                        that cannot present there is replaced by Direct3D 12's */
 } DhdrDeviceDesc;
 /* 1: the device exists (later calls return 1 at once, whatever d holds); 0: failed (logged), and
    every later call returns 0 too. Native: blocks until the device exists. Browser: the device is

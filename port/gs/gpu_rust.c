@@ -294,14 +294,24 @@ static int dxgi_adapter(unsigned vendor, unsigned id, DXGI_ADAPTER_DESC1 *desc, 
    adapter, or another DHD_WGPU_ADAPTER value, wgpu's high-performance choice (WARP last).
    Elsewhere wgpu's high-performance adapter. On Windows DHD_GRAPHICS_API_RUNNING then says which
    API runs (dx12 or vulkan), for REVIVED SETTINGS' Graphics API row (pc_settings.c).
+   window (NULL in tools and tests) is the game's: a Vulkan device on Windows must present there,
+   else Direct3D 12 runs (Rust's device::init).
    Once the device exists later calls return 1 at once; a failure is latched by dhdr_device_init. */
-static int device_init(void)
+static int device_init(const GsWindow *window)
 {
     if (device.made) return 1;
     DhdrDeviceDesc d;
     memset(&d, 0, sizeof d);
     d.size = sizeof d;
     d.abi = DHDR_ABI_VERSION;
+    DhdrWindow w;
+    memset(&w, 0, sizeof w);
+    if (window && window->a) {
+        w.kind = window->kind;
+        w.a = window->a;
+        w.b = window->b;
+        d.window = &w;
+    }
     const char *backend = getenv("DHD_WGPU_BACKEND"), *compiler = getenv("DHD_WGPU_COMPILER");
     const char *choice = getenv("DHD_WGPU_ADAPTER"), *dual = getenv("DHD_WGPU_DUAL_SOURCE");
     if (backend && !strcmp(backend, "vulkan")) d.flags |= DHDR_DEV_VULKAN;
@@ -570,11 +580,11 @@ int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned heigh
     return 1;
 }
 
-int gs_gpu_init(Gs *g)
+int gs_gpu_init(Gs *g, const GsWindow *window)
 {
     const char *render = getenv("DHD_RENDER");
     int native = render && !strcmp(render, "native");
-    if (!device_init()) return 0;
+    if (!device_init(window)) return 0;
     Rust *p = calloc(1, sizeof *p);
     if (!p) return 0;
     g->backend = p;

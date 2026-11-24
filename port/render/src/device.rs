@@ -40,6 +40,9 @@ pub struct DeviceOptions {
     pub log_level: u32,
     /// dxcompiler.dll, or None (FXC).
     pub dxc_path: Option<String>,
+    /// The game's window: on Windows a Vulkan device must present there (`init`). None in tools,
+    /// tests and the browser.
+    pub window: Option<DhdrWindow>,
 }
 
 /// The device and what was learnt making it. Send + Sync (natively; on wasm through wgpu's
@@ -139,6 +142,64 @@ pub fn backends(o: &DeviceOptions) -> wgpu::Backends {
 /// back to.
 pub fn direct3d_instead(flags: u32) -> Option<u32> {
     (cfg!(windows) && flags & DHDR_DEV_VULKAN != 0).then_some(flags & !DHDR_DEV_VULKAN)
+}
+
+/// Whether `g`, made for `o`, can present to the game's window: checked where a failure has
+/// something to fall back to (Windows' Vulkan, `direct3d_instead`) and C gave the window. A Vulkan
+/// adapter can make its device and still not present to the window, and once `init` installs a
+/// device it is the process's for good, so the check comes first: a surface on the window with
+/// RGBA8 or BGRA8, configured to the window's size, then dropped (present.c makes the real one).
+/// `DHD_TEST_VULKAN_NO_SURFACE=1` (tests only) fails it.
+fn presents(g: &Gpu, o: &DeviceOptions) -> Result<(), String> {
+    match o.window {
+        Some(w) if direct3d_instead(o.flags).is_some() => window_presents(g, &w)
+            .map_err(|e| format!("{} cannot present to the game's window: {e}", g.name.to_string_lossy())),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(all(windows, feature = "native"))]
+fn window_presents(g: &Gpu, w: &DhdrWindow) -> Result<(), String> {
+    if std::env::var("DHD_TEST_VULKAN_NO_SURFACE").is_ok_and(|v| v.trim() == "1") {
+        return Err("DHD_TEST_VULKAN_NO_SURFACE=1 (a test)".into());
+    }
+    windows_link::link!("user32.dll" "system" fn GetClientRect(hwnd: isize, rect: *mut [i32; 4]) -> i32);
+    let mut rect = [0i32; 4];
+    // SAFETY: w.a is the window's HWND (DHDR_WINDOW_WIN32); rect is a RECT's four LONGs.
+    if unsafe { GetClientRect(w.a as isize, &mut rect) } == 0 {
+        return Err("GetClientRect failed".into());
+    }
+    let max = g.device.limits().max_texture_dimension_2d;
+    let (width, height) = (((rect[2] - rect[0]).max(1) as u32).min(max), ((rect[3] - rect[1]).max(1) as u32).min(max));
+    let surface = crate::present::surface::Surface::window(g, w)?;
+    let caps = surface.get_capabilities(&g.adapter);
+    let format = crate::present::surface::surface_format(&caps.formats)
+        .ok_or_else(|| format!("the surface has neither rgba8unorm nor bgra8unorm (formats {:?})", caps.formats))?;
+    let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) || caps.alpha_modes.is_empty() {
+        wgpu::CompositeAlphaMode::Opaque
+    } else {
+        caps.alpha_modes[0]
+    };
+    let scope = g.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    surface.configure(&g.device, &wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format,
+        width,
+        height,
+        present_mode: wgpu::PresentMode::Fifo,
+        desired_maximum_frame_latency: 1,
+        alpha_mode,
+        view_formats: vec![],
+    });
+    match pollster::block_on(scope.pop()) {
+        Some(e) => Err(format!("configure {width}x{height} {format:?}: {e}")),
+        None => Ok(()),
+    }
+}
+
+#[cfg(not(all(windows, feature = "native")))]
+fn window_presents(_: &Gpu, _: &DhdrWindow) -> Result<(), String> {
+    Ok(())
 }
 
 /// Intel's PCI vendor id.
@@ -429,7 +490,7 @@ pub fn init(o: &DeviceOptions) -> bool {
         return false;
     }
     crate::log::set_level(o.log_level);
-    let made = Gpu::create(o).or_else(|e| match direct3d_instead(o.flags) {
+    let made = Gpu::create(o).and_then(|g| presents(&g, o).map(|()| g)).or_else(|e| match direct3d_instead(o.flags) {
         Some(flags) => {
             crate::host::log(&format!("gs: Vulkan could not start ({e}); the game runs on Direct3D 12 instead \
                                        (graphics_api in dhd.ini, or DHD_WGPU_BACKEND)"));

@@ -12,7 +12,7 @@
 #define ROWS \
     S(DhdrDeviceDesc) F(DhdrDeviceDesc, size) F(DhdrDeviceDesc, abi) F(DhdrDeviceDesc, flags) \
         F(DhdrDeviceDesc, vendor_id) F(DhdrDeviceDesc, device_id) F(DhdrDeviceDesc, log_level) \
-        F(DhdrDeviceDesc, dxc_path) \
+        F(DhdrDeviceDesc, dxc_path) F(DhdrDeviceDesc, window) \
     S(DhdrExactStats) F(DhdrExactStats, submits) F(DhdrExactStats, reads) F(DhdrExactStats, read_ticks) \
         F(DhdrExactStats, dispatches) F(DhdrExactStats, bytes_written) F(DhdrExactStats, copies) \
     S(DhdrWindow) F(DhdrWindow, kind) F(DhdrWindow, reserved) F(DhdrWindow, a) F(DhdrWindow, b) \

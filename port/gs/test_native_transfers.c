@@ -72,7 +72,7 @@ static int test_gpu_init(Gs *g)
     const char *ee = getenv("DHD_TEST_EE_MXCSR");
     unsigned csr = _mm_getcsr();
     if (ee && atoi(ee) == 1) _mm_setcsr((csr & 63u) | 0xFFC0u);
-    int ok = gs_gpu_init(g);
+    int ok = gs_gpu_init(g, NULL);
     _mm_setcsr(csr);
     return ok;
 }

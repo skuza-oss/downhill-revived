@@ -31,7 +31,7 @@ const PTR: usize = size_of::<*const u8>();
 fn all() -> Vec<(&'static str, usize, usize, Vec<Field>)> {
     vec![
         fields!(DhdrDeviceDesc { size: u32, abi: u32, flags: u32, vendor_id: u32, device_id: u32, log_level: u32,
-                                 dxc_path: *const u8 }),
+                                 dxc_path: *const u8, window: *const u8 }),
         fields!(DhdrExactStats { submits: u64, reads: u64, read_ticks: u64, dispatches: u64, bytes_written: u64,
                                  copies: u64 }),
         fields!(DhdrWindow { kind: u32, reserved: u32, a: u64, b: u64 }),
@@ -79,7 +79,7 @@ fn every_field_listed_and_no_implicit_padding() {
 #[test]
 fn pointers_come_last_and_the_prefix_is_target_independent() {
     // The pointer-free prefix of each struct with pointers, the same on every target.
-    let prefix = [("DhdrDeviceDesc", 24usize, 1usize), ("DhdrCommand", 216, 3), ("DhdrConvert", 1640, 1),
+    let prefix = [("DhdrDeviceDesc", 24usize, 2usize), ("DhdrCommand", 216, 3), ("DhdrConvert", 1640, 1),
                   ("DhdrPicture", 88, 5)];
     for (name, size, _align, fields) in all() {
         let first_ptr = fields.iter().position(|f| f.0 == "dxc_path" || f.0 == "texture" || f.0 == "base"
@@ -111,7 +111,7 @@ fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrExactStats>(), 48);
     assert_eq!(size_of::<DhdrPictureResult>(), 80);
     assert_eq!(size_of::<DhdrPresentRect>(), 48);
-    assert_eq!(size_of::<DhdrDeviceDesc>(), 24 + PTR);
+    assert_eq!(size_of::<DhdrDeviceDesc>(), 24 + 2 * PTR);
     assert_eq!(size_of::<DhdrCommand>(), 216 + 3 * PTR);
     assert_eq!(size_of::<DhdrConvert>(), 1640 + PTR);
     assert_eq!(size_of::<DhdrPicture>(), 88 + 5 * PTR);
@@ -122,7 +122,7 @@ fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrTexture>(), 0);
     if cfg!(target_arch = "x86_64") {
         assert_eq!((size_of::<DhdrDeviceDesc>(), size_of::<DhdrCommand>(), size_of::<DhdrConvert>(),
-                    size_of::<DhdrPicture>()), (32, 240, 1648, 128));
+                    size_of::<DhdrPicture>()), (40, 240, 1648, 128));
     }
 }
 

@@ -68,7 +68,7 @@ int test_gpu_init(Gs *g)
 {
     if (!test_gpu_hardware()) _putenv_s("DHD_WGPU_ADAPTER", "fallback");
     unsigned csr = test_ee_mxcsr_enter();
-    int ok = gs_gpu_init(g);
+    int ok = gs_gpu_init(g, NULL);
     test_ee_mxcsr_leave(csr);
     return ok;
 }

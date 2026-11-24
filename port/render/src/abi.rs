@@ -54,6 +54,9 @@ pub struct DhdrDeviceDesc {
     pub log_level: u32,
     /// UTF-8 path of dxcompiler.dll, NUL-terminated, or null (FXC).
     pub dxc_path: *const c_char,
+    /// The game's window, or null: on Windows a Vulkan device must present there, else the game
+    /// runs on Direct3D 12 (`device::init`, finding 284).
+    pub window: *const DhdrWindow,
 }
 
 // ---------------- exact ----------------
@@ -426,8 +429,8 @@ macro_rules! layout {
 
 const _: () = assert!(P == 4 || P == 8, "pointers are 4 or 8 bytes");
 
-layout!(DhdrDeviceDesc, size with_ptrs(24, 1), align P, {
-    size @ 0, abi @ 4, flags @ 8, vendor_id @ 12, device_id @ 16, log_level @ 20, dxc_path @ 24,
+layout!(DhdrDeviceDesc, size with_ptrs(24, 2), align P, {
+    size @ 0, abi @ 4, flags @ 8, vendor_id @ 12, device_id @ 16, log_level @ 20, dxc_path @ 24, window @ 24 + P,
 });
 layout!(DhdrExactStats, size 48, align 8, {
     submits @ 0, reads @ 8, read_ticks @ 16, dispatches @ 24, bytes_written @ 32, copies @ 40,

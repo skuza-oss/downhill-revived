@@ -464,7 +464,7 @@ static int init(void)
     sdl_host_run(make_window, &spec);  /* on the main thread: the window's messages are its queue's */
     if (!sdl_window) return 0;
     if (!target_ready && !wait_target(200)) { hle_log("gs: the window has no native handle\n"); return 0; }
-    if (!gs_gpu_init(&gs)) return 0;
+    if (!gs_gpu_init(&gs, &target)) return 0;
     if (!gs_gpu_surface(&gs, &target)) {
         hle_log("gs: the renderer has no surface on the window\n");
         gs_gpu_destroy(&gs);

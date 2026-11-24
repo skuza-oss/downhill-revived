@@ -1022,6 +1022,7 @@ impl DeviceBackend {
             device_id: h.device_id,
             log_level: DHDR_LOG_WARN,
             dxc_path,
+            window: None,
         };
         if !dhd_render::device::init(&o) {
             return Err("no device (the renderer logged why)".into());
