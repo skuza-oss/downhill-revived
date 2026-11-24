@@ -87,6 +87,7 @@ typedef struct {
     uint64_t key;
     NATIVE_TEXTURE_GPU    /* texture and view; sharp: the game's font made sharp, or with other button icons (font_sharp.c), or none */
     uint64_t used;        /* last field that drew with it */
+    uint32_t bytes;       /* its decoded pixels' bytes (native_decode), in texture_bytes */
     TexPackEntry *pack;   /* its replacement (texpack.c), once looked up (pack_checked) */
     int pack_checked;
 } NativeTexture;
@@ -270,6 +271,10 @@ typedef struct Native {
     uint8_t page_hash_valid[512];
     NativeTexture textures[NATIVE_TEXTURES];
     unsigned texture_count;
+    /* The decoded textures' bytes and what they may take before the oldest are freed
+       (native_texture_trim, finding 281): set from the device's memory (native_init), 0 none. */
+    uint64_t texture_bytes, texture_budget;
+    uint64_t texture_trims, texture_trimmed;
     int texpack;                       /* a texture pack is open (texpack.c) */
     int replace_on;                    /* replacements can be drawn (their samplers exist) */
     uint64_t replaced_draws;
@@ -736,6 +741,68 @@ static uint64_t native_palette_digest(Native *n, const Gs *g, uint64_t tex0, int
     return n->palette_last.digest;
 }
 
+/* A texture's w x h pixels from GS memory as the GPU takes them (its palette's colours for an
+   indexed one); NULL without memory. */
+static uint32_t *native_decode_pixels(Native *n, Gs *g, uint64_t tex0, unsigned w, unsigned h)
+{
+    unsigned psm = (unsigned)(tex0 >> 20) & 63, tbp = (unsigned)tex0 & 0x3FFF, tbw = (unsigned)(tex0 >> 14) & 63;
+    uint32_t *pixels = malloc((size_t)w * h * 4), palette[256];
+    if (!pixels) return NULL;
+    int indexed = psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH;
+    if (indexed) memcpy(palette, native_palette(n, g, tex0, 1), sizeof palette);
+    if (!tbw) tbw = 1;
+    for (unsigned y = 0; y < h; y++)
+        for (unsigned x = 0; x < w; x++) {
+            uint32_t v = gs_image_pixel(g->vram, psm, tbp, tbw, x, y);
+            pixels[y * w + x] = indexed ? palette[v & 255] : gs_color(v, psm, g->reg[GS_TEXA]);
+        }
+    return pixels;
+}
+
+/* A cached texture freed (its slot empty) and its bytes off texture_bytes. */
+static void native_texture_drop(Native *n, NativeTexture *t)
+{
+    if (t->gpu) n->texture_bytes -= t->bytes;
+    native_texture_release(t);
+    t->bytes = 0;
+}
+
+/* The decoded textures no queued or rendering field may use (drawn more than 8 fields ago, as
+   native_decode's own eviction), oldest first, freed until texture_bytes is at most `keep`
+   (finding 281: on a 3 GB iPhone every texture also takes the app's small address space, and
+   the cache's 4096 slots otherwise fill with every texture a session ever showed). 1 when it
+   freed any. The first trim and every 20th are logged. */
+static int native_texture_trim(Native *n, uint64_t keep)
+{
+    typedef struct { uint64_t used; unsigned slot; } Old;
+    Old *old = malloc(NATIVE_TEXTURES * sizeof *old);
+    if (!old) return 0;
+    unsigned count = 0;
+    for (unsigned i = 0; i < NATIVE_TEXTURES; i++) {
+        const NativeTexture *t = &n->textures[i];
+        if (t->gpu && t->used + 8 < n->field) old[count++] = (Old){t->used, i};
+    }
+    /* oldest first: a counting pass would do, but this runs once per many fields */
+    for (unsigned i = 1; i < count; i++) {
+        Old o = old[i];
+        unsigned j = i;
+        for (; j && old[j - 1].used > o.used; j--) old[j] = old[j - 1];
+        old[j] = o;
+    }
+    uint64_t before = n->texture_bytes;
+    unsigned freed = 0;
+    for (unsigned i = 0; i < count && n->texture_bytes > keep; i++, freed++)
+        native_texture_drop(n, &n->textures[old[i].slot]);
+    free(old);
+    if (freed && (n->texture_trims++ % 20) == 0)
+        fprintf(stderr, "gs native: field %llu: %u textures freed (%.1f of %.1f MiB, budget %.1f MiB), trim %llu, %llu freed in all\n",
+                (unsigned long long)n->field, freed, (before - n->texture_bytes) / 1048576.0, before / 1048576.0,
+                n->texture_budget / 1048576.0, (unsigned long long)n->texture_trims,
+                (unsigned long long)(n->texture_trimmed + freed));
+    n->texture_trimmed += freed;
+    return freed != 0;
+}
+
 static NativeTexture *native_decode(Native *n, Gs *g, unsigned ctxt, uint64_t tex0, unsigned w, unsigned h, uint64_t key)
 {
     unsigned slot = (unsigned)(key % NATIVE_TEXTURES);
@@ -751,18 +818,11 @@ static NativeTexture *native_decode(Native *n, Gs *g, unsigned ctxt, uint64_t te
         if (t->used + 8 < n->field && (!victim || t->used < victim->used)) victim = t;
     }
     if (!victim) return NULL;
-    native_texture_release(victim);
-    unsigned psm = (unsigned)(tex0 >> 20) & 63, tbp = (unsigned)tex0 & 0x3FFF, tbw = (unsigned)(tex0 >> 14) & 63;
-    uint32_t *pixels = malloc((size_t)w * h * 4), palette[256];
+    native_texture_drop(n, victim);
+    uint32_t *pixels = native_decode_pixels(n, g, tex0, w, h);
     if (!pixels) return NULL;
+    unsigned psm = (unsigned)(tex0 >> 20) & 63;
     int indexed = psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH;
-    if (indexed) memcpy(palette, native_palette(n, g, tex0, 1), sizeof palette);
-    if (!tbw) tbw = 1;
-    for (unsigned y = 0; y < h; y++)
-        for (unsigned x = 0; x < w; x++) {
-            uint32_t v = gs_image_pixel(g->vram, psm, tbp, tbw, x, y);
-            pixels[y * w + x] = indexed ? palette[v & 255] : gs_color(v, psm, g->reg[GS_TEXA]);
-        }
     /* The text engine's font, made sharp for high resolutions (dhd.ini font, finding 058), or with
        other button icons: over a pack's replacement of it when there is one (finding 200), so its
        replacement is looked up here. */
@@ -770,8 +830,18 @@ static NativeTexture *native_decode(Native *n, Gs *g, unsigned ctxt, uint64_t te
     TexPackEntry *pack = sharp && n->texpack ? texpack_find(g, ctxt) : NULL;
     int made = native_texture_create(n, victim, pixels, w, h, sharp, key, pack);
     free(pixels);
-    if (!made) return NULL;
+    if (!made) {
+        /* A full device (finding 281): free what no queued field uses and try once more. */
+        if (!n->texture_bytes || !native_texture_trim(n, n->texture_bytes / 2)) return NULL;
+        if (!(pixels = native_decode_pixels(n, g, tex0, w, h))) return NULL;
+        made = native_texture_create(n, victim, pixels, w, h, sharp, key, pack);
+        free(pixels);
+        if (!made) return NULL;
+    }
     victim->key = key; victim->used = n->field;
+    victim->bytes = w * h * 4;
+    n->texture_bytes += victim->bytes;
+    if (n->texture_budget && n->texture_bytes > n->texture_budget) native_texture_trim(n, n->texture_budget / 4 * 3);
     victim->pack = pack; victim->pack_checked = sharp && n->texpack;
     n->stats.decoded++; n->stats.decoded_texels += (uint64_t)w * h;
     return victim;
@@ -3455,6 +3525,17 @@ static void native_aspect_options(Native *n)
         if (aspect && (sscanf(aspect, "%u:%u", &aw, &ah) != 2 || !aw || !ah)) aw = 4, ah = 3;
         n->aspect = (float)aw / ah;
     }
+}
+
+/* The decoded textures' budget (finding 281) for a device with ram_mib MiB of memory (0: not known):
+   1/16 of it, at least 128 and at most 512 MiB (a 3 GB iPhone 179 MiB, 4 GB 256 MiB, 8 GB and more
+   512 MiB: on a PC the 4096 slots seldom reach it). DHD_NATIVE_TEXTURE_MB sets it (tests). */
+static uint64_t native_texture_budget(uint64_t ram_mib)
+{
+    const char *mb = getenv("DHD_NATIVE_TEXTURE_MB");
+    if (mb && atoi(mb) > 0) return (uint64_t)atoi(mb) << 20;
+    uint64_t budget = ram_mib ? ram_mib / 16 : 256;
+    return (budget < 128 ? 128 : budget > 512 ? 512 : budget) << 20;
 }
 
 /* A new renderer's shared state, before the backend creates its device objects; NULL without memory. */

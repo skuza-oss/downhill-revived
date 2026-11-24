@@ -50,6 +50,7 @@ extern void host_log_drain(void) __attribute__((weak));
 #endif
 #include <SDL3/SDL_atomic.h>
 #include <SDL3/SDL_timer.h>  /* the performance counter */
+#include <SDL3/SDL_cpuinfo.h>  /* SDL_GetSystemRAM: the decoded textures' budget (finding 281) */
 #include <math.h>    /* NAN */
 #include <stdio.h>
 #include <stdlib.h>
