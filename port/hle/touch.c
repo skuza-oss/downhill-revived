@@ -1538,6 +1538,22 @@ static Box editor_box(const Touch *t, int b)
         for (int i = EDIT_MINUS; i < b; i++) x += w[i] + G;
         return (Box){x + w[b] / 2, y, w[b] / 2, hh};
     }
+    /* two rows beside the top buttons, on the wide side: GROUND .. REDO, under them HIDE RESET DONE
+       next to the top buttons and the readout beyond (a 16:9 phone: the top buttons stay clear); on a
+       4-inch phone with a cutout or a strip, a little narrower */
+    float row1 = -G, row2 = -G;
+    for (int i = 0; i < EDIT_BUTTONS; i++) *(i < EDIT_HIDE ? &row1 : &row2) += w[i] + G;
+    if (wide >= 0.75f * row1) {
+        float k = fminf(1, wide / row1), y2 = y + 2 * hh + G;
+        if (b == EDIT_BUTTONS) {
+            float r0 = b_right ? span1 + row2 * k + 2 : lo, r1 = b_right ? hi : span0 - row2 * k - 2;
+            return (Box){(r0 + r1) / 2, y2, (r1 - r0) / 2, 1.5f};
+        }
+        int second = b >= EDIT_HIDE;
+        float x = b_right ? span1 : span0 - (second ? row2 : row1) * k;
+        for (int i = second ? EDIT_HIDE : 0; i < b; i++) x += (w[i] + G) * k;
+        return (Box){x + w[b] * k / 2, second ? y2 : y, w[b] * k / 2, hh};
+    }
     float total = 0, row_y = t->screen.height * 0.16f;
     for (int i = 0; i < EDIT_BUTTONS; i++) total += w[i] + 2;
     total += 28;   /* the size readout */
@@ -1547,9 +1563,10 @@ static Box editor_box(const Touch *t, int b)
         for (int i = 0; i < b; i++) x += w[i] + 2 + (i == EDIT_AIR ? 28 : 0);
         return (Box){x + w[b] / 2, row_y, w[b] / 2, 4.5f};
     }
-    /* two rows: GROUND .. REDO; under them the readout, then HIDE RESET DONE at the row's end (the
-       buttons narrower only on a screen under 73 mm across) */
-    float row1 = -2, row2 = -2;
+    /* two rows across (top buttons too wide to leave room beside them): GROUND .. REDO; under them the
+       readout, then HIDE RESET DONE at the row's end (the buttons narrower only on a screen under 70 mm
+       across) */
+    row1 = -2, row2 = -2;
     for (int i = 0; i < EDIT_BUTTONS; i++) *(i < EDIT_HIDE ? &row1 : &row2) += w[i] + 2;
     float k = fminf(1, (hi - lo) / row1);
     if (b == EDIT_BUTTONS) {
@@ -1562,6 +1579,14 @@ static Box editor_box(const Touch *t, int b)
 }
 
 static int in_box(Box b, float x, float y) { return fabsf(x - b.x) <= b.hw && fabsf(y - b.y) <= b.hh; }
+
+int touch_editor_button(const Touch *t, int b, float *x, float *y, float *hw, float *hh)
+{
+    if (!t->editor || b < 0 || b >= EDIT_BUTTONS) return 0;
+    Box r = editor_box(t, b);
+    *x = r.x, *y = r.y, *hw = r.hw, *hh = r.hh;
+    return 1;
+}
 
 int touch_target(const Touch *t, int kind, int index, float *x, float *y)
 {

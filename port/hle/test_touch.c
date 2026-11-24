@@ -2484,7 +2484,6 @@ static void test_editor_bar_phones(void)
 static void test_editor_bar_small(void)
 {
     static const float shapes[][2] = {{104.0f, 58.5f}, {88.5f, 49.9f}, {95.0f, 45.0f}, {110.0f, 50.0f}, {121.2f, 68.1f}, {130.0f, 60.0f}};
-    static const float half_w[9] = {6, 4.5f, 4.5f, 4.5f, 5, 5, 5, 5.5f, 5};
     for (int i = 0; i < (int)(sizeof shapes / sizeof *shapes); i++)
         for (int v = 0; v < 4; v++)   /* none, a cutout band left, right, a right gesture strip */
             for (int preset = 0; preset < 2; preset++)
@@ -2501,16 +2500,25 @@ static void test_editor_bar_small(void)
                     touch_configure(t, &s, &sc);
                     touch_open_editor(t);
                     field();
-                    float bx[9], by[9];
+                    float bx[9], by[9], half_w[9], half_h[9];
                     for (int b = 0; b < 9; b++) {
-                        CHECK(touch_target(t, TOUCH_TARGET_EDITOR, b, &bx[b], &by[b]));
-                        int inside = bx[b] - half_w[b] >= lo && bx[b] + half_w[b] <= hi && by[b] - 4.0f >= 0 && by[b] + 4.0f <= H;
+                        CHECK(touch_editor_button(t, b, &bx[b], &by[b], &half_w[b], &half_h[b]));
+                        CHECK(half_w[b] >= 0.75f * 4.5f && half_h[b] >= 3.0f);   /* a thumb's target still */
+                        int inside = bx[b] - half_w[b] >= lo && bx[b] + half_w[b] <= hi && by[b] - half_h[b] >= 0 && by[b] + half_h[b] <= H;
                         if (!inside) fprintf(stderr, "test_touch: %.1f x %.1f (%d) preset %d left %d: bar button %d at %.1f,%.1f\n", W, H, v, preset, left, b, bx[b], by[b]);
                         CHECK(inside);
+                        for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {   /* the top buttons stay clear */
+                            float cx, cy, hw, hh;
+                            touch_control(t, c, &cx, &cy, NULL);
+                            touch_control_size(t, c, &hw, &hh);
+                            int clear = fabsf(bx[b] - cx) >= half_w[b] + hw || fabsf(by[b] - cy) >= half_h[b] + hh;
+                            if (!clear) fprintf(stderr, "test_touch: %.1f x %.1f (%d) preset %d left %d: bar button %d over control %d\n", W, H, v, preset, left, b, c);
+                            CHECK(clear);
+                        }
                     }
                     for (int b = 0; b < 9; b++)
                         for (int d = b + 1; d < 9; d++)
-                            CHECK(fabsf(bx[b] - bx[d]) >= half_w[b] + half_w[d] + 1.0f || fabsf(by[b] - by[d]) >= 8.0f);
+                            CHECK(fabsf(bx[b] - bx[d]) >= half_w[b] + half_w[d] + 1.0f || fabsf(by[b] - by[d]) >= half_h[b] + half_h[d] + 1.0f);
                     editor_tap(E_HIDE);
                     CHECK(touch_target(t, TOUCH_TARGET_EDITOR, E_HIDE, &bx[0], &by[0]));
                     editor_tap(E_HIDE);

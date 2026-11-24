@@ -253,6 +253,9 @@ enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGE
        TOUCH_TARGET_SKIP /* the flight over the track's SKIP button, index 0 (finding 209) */,
        TOUCH_TARGET_DPAD /* the D-pad's arms: up, down, left, right (finding 214); 0 unless it steers */ };
 int touch_target(const Touch *t, int kind, int index, float *x, float *y);
+/* The layout editor's bar button b (as TOUCH_TARGET_EDITOR counts them): its centre and half sizes, mm;
+   0 when the editor is shut. */
+int touch_editor_button(const Touch *t, int b, float *x, float *y, float *hw, float *hh);
 /* Where a control sits now (centre and radius, mm); 0 if the layout has none, or it is hidden (only
    the editor's HIDE mode, where hidden controls show as ghosts to tap, gives a hidden one). */
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);
