@@ -1864,9 +1864,10 @@ static float size_set(Touch *t, int c, float want)
 }
 
 /* - and +: 5 % steps up to 100 %, 10 % to 200 %, 25 % above (25 % to 600 % in 37 steps; a held
-   button repeats). */
+   button repeats). Nothing in HIDE mode, where they are dimmed (a tap and a held repeat alike). */
 static void size_step(Touch *t, int dir)
 {
+    if (t->edit_hiding) return;
     if (t->edit_selected < 0 || (t->edit_selected == TC_STICK && !t->set.dpad)) return;   /* the stick's home has no size */
     float now_size = edit_of(t, t->edit_selected)->size;
     float probe = dir > 0 ? now_size + 0.001f : now_size - 0.001f;

@@ -3525,6 +3525,35 @@ static void test_editor_show_refused(void)
     fields(4);
 }
 
+/* The review of finding 283: in HIDE mode - and + are dimmed and do nothing, a tap or a hold; DONE
+   saves no size. With HIDE off they size the selected control again. */
+static void test_editor_hide_no_size(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_GROUND);   /* ✕ selected */
+    editor_tap(E_HIDE);
+    editor_tap(E_MINUS);
+    float x, y;
+    CHECK(touch_target(t, TOUCH_TARGET_EDITOR, E_PLUS, &x, &y));
+    touch_down(t, 90, x, y, now);
+    wait_ms(1000);   /* held: would repeat */
+    touch_up(t, 90, x, y, now);
+    field();
+    CHECK(size_of(1, TC_CROSS) == 1);
+    editor_tap(E_HIDE);
+    editor_tap(E_MINUS);
+    CHECK(fabsf(size_of(1, TC_CROSS) - 0.95f) < 0.001f);
+    editor_tap(E_UNDO);
+    editor_tap(E_DONE);
+    TouchSettings saved;
+    CHECK(touch_take_saved(t, &saved) & TOUCH_SAVED_LAYOUT);
+    char text[2048];
+    touch_layout_format(&saved, text, sizeof text);
+    CHECK(text[0] == 0);
+}
+
 /* The editor alone (the launcher's "Edit the touch layout") has the same bar: HIDE there too. */
 static void test_editor_alone_hide(void)
 {
@@ -3599,6 +3628,7 @@ int main(void)
     test_hidden_controls();
     test_editor_hide();
     test_editor_show_refused();
+    test_editor_hide_no_size();
     test_editor_alone_hide();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
