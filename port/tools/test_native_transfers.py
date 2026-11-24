@@ -5,7 +5,8 @@ renderer.
 
 builds port/gs/test_native_transfers.c for x86_64 over gpu_rust.c + dhd_render.lib
 (port/tools/test_gs_wgpu.py's build) and runs it twice: with dual-source blending where the GPU has it
-(wgpu) and with DHD_WGPU_DUAL_SOURCE=0 (the two-draw fallback, wgpu-no-dual), each dumping its pictures
+(wgpu) and with DHD_WGPU_DUAL_SOURCE=0 (the two-draw fallback, wgpu-no-dual; it also takes a 2 x 2-page
+import atlas, DHD_NATIVE_ATLAS_PAGES=2, finding 281), each dumping its pictures
 and the CPU's VRAM after each under build/port/test-native-transfers/dump/<run>/. Each run must pass
 its own checks (port/tools/gs_verdict.py, the one pass rule; every run must print "gs: renderer
 dhd_render ..." and report the wgpu backend); then every picture is compared pixel by pixel between
@@ -39,7 +40,9 @@ import test_gs_wgpu  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'build/port/test-native-transfers'
-RUNS = (('wgpu', {}), ('wgpu-no-dual', {'DHD_WGPU_DUAL_SOURCE': '0'}))
+# The second run also has an import atlas of 2 x 2 pages (finding 281: what a device short of memory
+# falls back to), so a 56-page picture is drawn in 14 passes; its pictures must still be the first's.
+RUNS = (('wgpu', {}), ('wgpu-no-dual', {'DHD_WGPU_DUAL_SOURCE': '0', 'DHD_NATIVE_ATLAS_PAGES': '2'}))
 
 
 def read_dumps(path):

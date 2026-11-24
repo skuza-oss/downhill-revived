@@ -52,8 +52,9 @@ pub const SURFACES: usize = DHDR_NATIVE_SURFACES as usize;
 /// The import texture's side (a page of IMPORT or ALPHA_UPLOAD pixels at 1x).
 const IMPORT_SIDE: u32 = 64;
 
-/// The import atlas: ATLAS_PAGES x ATLAS_PAGES pages of IMPORT_SIDE, where a run of upscaled
-/// IMPORT pages into one surface waits to be drawn in one pass (finding 281).
+/// The import atlas: at most ATLAS_PAGES x ATLAS_PAGES pages of IMPORT_SIDE, where a run of
+/// upscaled IMPORT pages into one surface waits to be drawn in one pass (finding 281). A device that
+/// refuses it gets one with half the side, down to one page (`Surfaces::atlas_texture`).
 const ATLAS_PAGES: u32 = 16;
 
 /// One surface's texture. Set only by this module.
@@ -132,6 +133,9 @@ pub struct Surfaces {
     /// The import atlas (TextureBinding | CopyDst), made on first use, and the pages in it not yet
     /// drawn, all into surface `pending_target` (`flush_imports`).
     atlas: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Its side in pages: what it was made with, or the next size to try (ATLAS_PAGES at first;
+    /// DHD_NATIVE_ATLAS_PAGES, a power of two up to it, for tests).
+    atlas_pages: u32,
     pending: Vec<Pending>,
     pending_target: usize,
     fill: Option<DepthFill>,
@@ -442,6 +446,8 @@ impl Surfaces {
             scratch_size: [0, 0],
             import: None,
             atlas: None,
+            atlas_pages: std::env::var("DHD_NATIVE_ATLAS_PAGES").ok().and_then(|v| v.parse::<u32>().ok())
+                .filter(|p| p.is_power_of_two() && *p <= ATLAS_PAGES).unwrap_or(ATLAS_PAGES),
             pending: Vec::new(),
             pending_target: 0,
             fill: None,
@@ -464,7 +470,7 @@ impl Surfaces {
         }
         if self.atlas.is_some() {
             count += 1;
-            bytes += px([ATLAS_PAGES * IMPORT_SIDE; 2]);
+            bytes += px([self.atlas_pages * IMPORT_SIDE; 2]);
         }
         crate::memory::set(crate::memory::Part::Surfaces, count, bytes);
     }
@@ -595,10 +601,11 @@ impl Surfaces {
         self.import.is_some()
     }
 
-    /// The import atlas, made on first use; false when it could not be.
+    /// The import atlas, made on first use; false when it could not be. A device that refuses it
+    /// (a phone short of memory) gets half the side, down to one page, and that size is kept.
     fn atlas_texture(&mut self, gpu: &Gpu) -> bool {
-        if self.atlas.is_none() {
-            let side = ATLAS_PAGES * IMPORT_SIDE;
+        while self.atlas.is_none() {
+            let side = self.atlas_pages * IMPORT_SIDE;
             match new_texture(gpu, side, side, wgpu::TextureFormat::Rgba8Unorm,
                               wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                               "native import atlas") {
@@ -606,10 +613,17 @@ impl Surfaces {
                     self.atlas = Some(t);
                     self.publish();
                 }
-                Err(e) => crate::host::log(&e),
+                Err(e) if self.atlas_pages > 1 => {
+                    self.atlas_pages /= 2;
+                    crate::host::log(&format!("{e}; the import atlas tries {} pages a side", self.atlas_pages));
+                }
+                Err(e) => {
+                    crate::host::log(&e);
+                    return false;
+                }
             }
         }
-        self.atlas.is_some()
+        true
     }
 
     /// Whether upscaled IMPORT pages wait in the atlas (`import`); render.rs draws them
@@ -633,8 +647,9 @@ impl Surfaces {
             self.pending.clear();
             return;
         };
+        let pages = self.atlas_pages;
         let rects: Vec<Rect> = self.pending.drain(..).filter_map(|p| {
-            let (ax, ay) = ((p.slot % ATLAS_PAGES * IMPORT_SIDE) as i32, (p.slot / ATLAS_PAGES * IMPORT_SIDE) as i32);
+            let (ax, ay) = ((p.slot % pages * IMPORT_SIDE) as i32, (p.slot / pages * IMPORT_SIDE) as i32);
             blit_rect(tt, t.size, 1, ax, ay, p.x, p.y, p.w, p.h)
         }).collect();
         let (gpu, layout, pipe, dummy) = (kit.gpu, kit.blit_layout, kit.blit_pipe, kit.dummy_view);
@@ -743,14 +758,14 @@ impl Surfaces {
         } else if k.w <= IMPORT_SIDE as i32 && k.h <= IMPORT_SIDE as i32 {
             // Into the atlas; drawn with the rest of its run (`flush_imports`).
             if let Some(p) = pixels {
-                let full = self.pending.len() as u32 == ATLAS_PAGES * ATLAS_PAGES;
+                let full = self.pending.len() as u32 >= self.atlas_pages * self.atlas_pages;
                 if !self.pending.is_empty() && (self.pending_target != ti || full) {
                     self.flush_imports(kit);
                 }
                 if self.atlas_texture(kit.gpu) {
                     let (atlas, _) = self.atlas.as_ref().expect("made above");
                     let slot = self.pending.len() as u32;
-                    let (ax, ay) = (slot % ATLAS_PAGES * IMPORT_SIDE, slot / ATLAS_PAGES * IMPORT_SIDE);
+                    let (ax, ay) = (slot % self.atlas_pages * IMPORT_SIDE, slot / self.atlas_pages * IMPORT_SIDE);
                     let (w, h) = (k.w as u32, k.h as u32);
                     let (offset, stride) = kit.arenas.upload(p, w, h);
                     if let Some(buffer) = kit.arenas.upload_buffer() {
