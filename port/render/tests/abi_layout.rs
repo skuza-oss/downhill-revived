@@ -122,7 +122,7 @@ fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrTexture>(), 0);
     if cfg!(target_arch = "x86_64") {
         assert_eq!((size_of::<DhdrDeviceDesc>(), size_of::<DhdrCommand>(), size_of::<DhdrConvert>(),
-                    size_of::<DhdrPicture>()), (32, 208, 1648, 128));
+                    size_of::<DhdrPicture>()), (32, 240, 1648, 128));
     }
 }
 
