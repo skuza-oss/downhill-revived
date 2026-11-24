@@ -2060,7 +2060,9 @@ static void editor_move(Touch *t, Finger *f)
 }
 
 /* HIDE mode: the control tapped hides, or its ghost shows again (one step of the history). The tap
-   counts where it lifts inside the control's touch area, as the bar's buttons count. */
+   counts where it lifts inside the control's touch area, as the bar's buttons count. A ghost shows
+   again only where it fits, as a drop must (another control may have moved onto its room while it
+   was hidden: shown over Pause, it took Pause's taps); else it stays a ghost, with a double buzz. */
 static void hide_toggle(Touch *t, Finger *f)
 {
     int c = f->control;
@@ -2068,6 +2070,12 @@ static void hide_toggle(Touch *t, Finger *f)
     TouchEdit *e = edit_of(t, c);
     e->hidden = !e->hidden;
     lay_out(t, t->set.hud_moved);
+    if (!e->hidden && !control_fits(t, c)) {
+        e->hidden = 1;
+        lay_out(t, t->set.hud_moved);
+        buzz(t, TOUCH_BUZZ_DOUBLE);
+        return;
+    }
     if (e->hidden && t->edit_selected == c) t->edit_selected = -1;
     if (!e->hidden) t->edit_selected = c;
     history_push(t);

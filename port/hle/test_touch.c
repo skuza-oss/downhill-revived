@@ -3479,6 +3479,52 @@ static void test_editor_hide(void)
     CHECK(!touch_settings(t)->edit[0][TC_PEDAL].hidden);
 }
 
+/* The review of finding 283: L1 at 130 % hidden, Pause moved onto it; its ghost tapped in HIDE mode
+   stays a ghost (shown, the larger L1 took every tap on Pause), with a double buzz and no history
+   step; with Pause moved away again it shows. */
+static void test_editor_show_refused(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    float lx, ly, px, py;
+    at(TC_L1, &lx, &ly), at(TC_PAUSE, &px, &py);
+    TouchSettings s = *touch_settings(t);
+    s.vibration = 1;
+    char text[256];
+    snprintf(text, sizeof text, "classic.layout=2;classic.l1=0.0,0.0,1.30,hide;classic.pause=%.1f,%.1f,1.00", lx - px, ly - py);
+    touch_layout_parse(&s, text);
+    touch_configure(t, &s, &PHONE);
+    field();
+    at(TC_PAUSE, &px, &py);
+    CHECK(fabsf(px - lx) < 0.2f && fabsf(py - ly) < 0.2f);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_HIDE);
+    touch_take_buzz(t);
+    touch_down(t, 88, lx, ly, now), field(), touch_up(t, 88, lx, ly, now), field();
+    CHECK(touch_settings(t)->edit[1][TC_L1].hidden);
+    CHECK(touch_take_buzz(t) == TOUCH_BUZZ_DOUBLE);
+    editor_tap(E_UNDO);   /* nothing was a step: UNDO takes back nothing of L1's */
+    CHECK(touch_settings(t)->edit[1][TC_L1].hidden);
+    /* Pause away again (HIDE off), then the ghost shows */
+    editor_tap(E_HIDE);
+    drag(TC_PAUSE, px > 154.5f / 2 ? 30 : -30, -(py - 8));
+    float qx, qy;
+    at(TC_PAUSE, &qx, &qy);
+    CHECK(fabsf(qx - lx) > 15);
+    editor_tap(E_HIDE);
+    touch_down(t, 88, lx, ly, now), field(), touch_up(t, 88, lx, ly, now), field();
+    CHECK(!touch_settings(t)->edit[1][TC_L1].hidden);
+    editor_tap(E_DONE);
+    /* in the race: Pause where it is now pauses, L1 sends L1 */
+    float x, y;
+    at(TC_L1, &x, &y);
+    touch_down(t, 89, x, y, now);
+    field();
+    CHECK((buttons() & (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2)) == PAD_L1);
+    touch_up(t, 89, x, y, now);
+    fields(4);
+}
+
 /* The editor alone (the launcher's "Edit the touch layout") has the same bar: HIDE there too. */
 static void test_editor_alone_hide(void)
 {
@@ -3552,6 +3598,7 @@ int main(void)
     test_bar_migration_sizes();
     test_hidden_controls();
     test_editor_hide();
+    test_editor_show_refused();
     test_editor_alone_hide();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
