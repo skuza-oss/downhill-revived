@@ -43,10 +43,6 @@
                     "if": "{install}/dhd.ini"
                 },
                 {
-                    "path": "{local}/downhill-revived/dhd.ini",
-                    "if": "{local}/downhill-revived/dhd.ini"
-                },
-                {
                     "path": "{data}/dhd.ini",
                     "if": "{install}/AppRun"
                 },
