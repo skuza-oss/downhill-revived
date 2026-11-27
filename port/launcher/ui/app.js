@@ -931,7 +931,7 @@ function renderAll() {
 // ---------- actions ----------
 
 async function checkUpdate() {
-  // started by RecompLauncher on Linux (managed-updates): it brings the updates; no check here
+  // started by RecompLauncher (managed-updates): it brings the updates; no check here
   if (get('auto_update') === 'off' || has('managed-updates')) { state.check = 'off'; return renderFooter(); }
   state.check = 'checking';
   renderFooter();

@@ -44,7 +44,7 @@ const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-
 #[cfg(not(windows))]
 const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-update", "patch-notes", "close-game"];
 
-/// CAPS, but started by RecompLauncher on Linux (game::updated_by_recomplauncher): its updates are
+/// CAPS, but started by RecompLauncher (game::updated_by_recomplauncher): its updates are
 /// RecompLauncher's, so no update check, installs or patch notes here ("managed-updates").
 fn caps() -> Vec<&'static str> {
     if !game::updated_by_recomplauncher() {
@@ -432,7 +432,7 @@ fn play_at_once(place: game::Place) -> Option<game::Place> {
         return Some(place);
     }
     let Ok(mut child) = place.start() else { return Some(place) };
-    // started by RecompLauncher on Linux: no check and no install, whatever auto_update says
+    // started by RecompLauncher: no check and no install, whatever auto_update says
     let auto = if game::updated_by_recomplauncher() { "off".to_string() } else { effective(&place, "auto_update") };
     let check = (auto != "off").then(|| {
         let place = place.clone();

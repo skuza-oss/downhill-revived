@@ -251,10 +251,11 @@ fn recomplauncher_data() -> Option<PathBuf> {
     std::env::var_os("RECOMPLAUNCHER_DATA").map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
-/// Started by RecompLauncher on Linux (RECOMPLAUNCHER=1): it installs the game's releases itself, so
-/// this launcher never looks for, offers or installs one (RecompLauncher's guide for developers).
+/// Started by RecompLauncher (RECOMPLAUNCHER=1), on any system: it installs the game's releases
+/// itself, so this launcher never looks for, offers or installs one (RecompLauncher's guide for
+/// developers). Only the updates: where the player's files go is recomplauncher_data's.
 pub fn updated_by_recomplauncher() -> bool {
-    cfg!(target_os = "linux") && std::env::var_os("RECOMPLAUNCHER").is_some_and(|v| v == "1")
+    std::env::var_os("RECOMPLAUNCHER").is_some_and(|v| v == "1")
 }
 
 /// The player's files copy_old_data takes from the old data folder: dhd.ini first (the only one

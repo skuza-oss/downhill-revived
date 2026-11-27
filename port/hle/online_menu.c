@@ -245,11 +245,11 @@ static int outdated;  /* the server refused this release: HOME offers Update Now
 /* 44 characters: the footer fits about 45 at 640 wide (0.1.0 shows the server's copy there too) */
 static const char outdated_text[] = "A new version is out. Update to play online.";
 
-/* Started by RecompLauncher on Linux (RECOMPLAUNCHER=1): it installs the releases itself, so HOME has
+/* Started by RecompLauncher (RECOMPLAUNCHER=1): it installs the releases itself, so HOME has
    no Update Now (port/launcher game.rs updated_by_recomplauncher). */
 static int updated_by_recomplauncher(void)
 {
-#if defined(__linux__) && !defined(__ANDROID__)
+#ifndef __ANDROID__
     const char *by = getenv("RECOMPLAUNCHER");
     return by && !strcmp(by, "1");
 #else
