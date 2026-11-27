@@ -31,6 +31,26 @@
             "format": "ini",
             "file": [
                 {
+                    "path": "{data}/dhd.ini",
+                    "if": "{data}/.copied-from-old-folder"
+                },
+                {
+                    "path": "{install}/usr/bin/dhd.ini",
+                    "if": "{install}/usr/bin/dhd.ini"
+                },
+                {
+                    "path": "{install}/dhd.ini",
+                    "if": "{install}/dhd.ini"
+                },
+                {
+                    "path": "{data}/dhd.ini",
+                    "if": "{install}/AppRun"
+                },
+                {
+                    "path": "{data}/dhd.ini",
+                    "if": "{install}/dhd"
+                },
+                {
                     "path": "{install}/dhd.ini"
                 }
             ],
@@ -38,15 +58,45 @@
         }
     ],
     "saves": [
-        "{install}/saves"
+        "{install}/saves",
+        "{data}/saves",
+        "{install}/usr/bin/saves"
     ],
     "folders": {
         "saves": [
+            {
+                "path": "{data}/saves",
+                "if": "{data}/.copied-from-old-folder"
+            },
+            {
+                "path": "{install}/usr/bin/saves",
+                "if": "{install}/usr/bin/saves"
+            },
+            {
+                "path": "{install}/saves",
+                "if": "{install}/saves"
+            },
+            {
+                "path": "{data}/saves",
+                "if": "{install}/AppRun"
+            },
+            {
+                "path": "{data}/saves",
+                "if": "{install}/dhd"
+            },
             {
                 "path": "{install}/saves"
             }
         ],
         "logs": [
+            {
+                "path": "{data}",
+                "if": "{data}/.copied-from-old-folder"
+            },
+            {
+                "path": "{install}/usr/bin",
+                "if": "{install}/usr/bin/dhd.log"
+            },
             {
                 "path": "{install}"
             }
