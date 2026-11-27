@@ -43,6 +43,10 @@
                     "if": "{install}/dhd.ini"
                 },
                 {
+                    "path": "{local}/downhill-revived/dhd.ini",
+                    "if": "{local}/downhill-revived/dhd.ini"
+                },
+                {
                     "path": "{data}/dhd.ini",
                     "if": "{install}/AppRun"
                 },
@@ -60,7 +64,8 @@
     "saves": [
         "{install}/saves",
         "{data}/saves",
-        "{install}/usr/bin/saves"
+        "{install}/usr/bin/saves",
+        "{local}/downhill-revived/saves"
     ],
     "folders": {
         "saves": [
@@ -75,6 +80,10 @@
             {
                 "path": "{install}/saves",
                 "if": "{install}/saves"
+            },
+            {
+                "path": "{local}/downhill-revived/saves",
+                "if": "{local}/downhill-revived/saves"
             },
             {
                 "path": "{data}/saves",
