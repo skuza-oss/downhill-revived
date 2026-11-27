@@ -66,7 +66,8 @@ const TABS = [
     { key: 'skip_movies', label: 'row.skipMovies', type: 'switch' },
     { key: 'unlock_all', label: 'row.unlockAll', hint: 'row.unlockAll.hint', type: 'switch' },
     { key: 'auto_update', label: 'row.updates', hint: () => (has('install-update') ? 'row.updates.hint' : 'row.updates.hintPhone'), type: 'seg',
-      allow: (v) => has('install-update') || v !== 'on' },
+      allow: (v) => has('install-update') || v !== 'on',
+      when: () => !has('managed-updates'), hideOff: true },
     { key: 'launcher', label: 'row.launcher', hint: 'row.launcher.hint', type: 'switch', needs: 'direct-start' },
     { key: 'language', label: 'row.language', hint: 'row.language.hint', type: 'language', when: () => LANGUAGES.length > 1, hideOff: true },
   ]],
@@ -930,7 +931,8 @@ function renderAll() {
 // ---------- actions ----------
 
 async function checkUpdate() {
-  if (get('auto_update') === 'off') { state.check = 'off'; return renderFooter(); }
+  // started by RecompLauncher (managed-updates): it brings the updates; no check here
+  if (get('auto_update') === 'off' || has('managed-updates')) { state.check = 'off'; return renderFooter(); }
   state.check = 'checking';
   renderFooter();
   try {

@@ -9,6 +9,11 @@
 //! - else the game's folder when it is a plain folder the player can write to (the zips, portable
 //!   as always);
 //! - else (a read-only folder such as Program Files) the system's folder for app data too.
+//! On Linux, RecompLauncher's data folder (RECOMPLAUNCHER_DATA, `{data}` in recomplauncher.json)
+//! comes first: the launcher backs up, moves and uninstalls the game with it. The first start with
+//! it copies the player's files in from the folder the rule above picks, or else from the system's
+//! folder for app data (where an AppImage RecompLauncher still ran as an image kept them;
+//! copy_old_data), and the folder the rule picks stays the data folder until the copy has finished.
 //! The game is started with that folder in DHD_SETTINGS, DHD_MEMCARD_DIR and DHD_DATA_DIR (dhd.log,
 //! iso-check.txt), and with DHD_LAUNCHER=1, so it doesn't open the launcher again
 //! (port/hle/launcher_link.c). The online menu's Update Now ends it with UPDATE_EXIT_CODE, and the
@@ -62,7 +67,22 @@ impl Place {
                 .unwrap_or_else(|| PathBuf::from("."))
         });
         let appimage = appimage(&game, std::env::var_os("APPIMAGE"), std::env::var_os("APPDIR"));
-        Place::at(game, app_data(), appimage)
+        let place = Place::at(game, app_data(), appimage);
+        match recomplauncher_data() {
+            Some(data) => place.with_data(data, app_data()),
+            None => place,
+        }
+    }
+
+    /// RecompLauncher's data folder in place of this one's, once the player's files are in it
+    /// (copy_old_data, from this one's, else from app_data); until then this place as it is.
+    pub fn with_data(self, data: PathBuf, app_data: Option<PathBuf>) -> Place {
+        let mut olds = vec![self.data.as_path()];
+        olds.extend(app_data.as_deref().filter(|a| *a != self.data && *a != data));
+        if data == self.data || fs::create_dir_all(&data).is_err() || !copy_old_data(&olds, &data) {
+            return self;
+        }
+        Place { data, ..self }
     }
 
     /// The rule above, for the launcher in folder game; app_data is the system's folder for it,
@@ -223,6 +243,155 @@ fn app_data() -> Option<PathBuf> {
     }
 }
 
+/// RecompLauncher's data folder for the game (RECOMPLAUNCHER_DATA), on Linux; an absolute path only.
+fn recomplauncher_data() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    std::env::var_os("RECOMPLAUNCHER_DATA").map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
+/// Started by RecompLauncher (RECOMPLAUNCHER=1), on any system: it installs the game's releases
+/// itself, so this launcher never looks for, offers or installs one (RecompLauncher's guide for
+/// developers). Only the updates: where the player's files go is recomplauncher_data's.
+pub fn updated_by_recomplauncher() -> bool {
+    std::env::var_os("RECOMPLAUNCHER").is_some_and(|v| v == "1")
+}
+
+/// The player's files copy_old_data takes from the old data folder: dhd.ini first (the only one
+/// that replaces what's there), then the rest, never over one already there. Not the logs, the
+/// update's work folder or its file list.
+const OLD_DATA: [&str; 5] = ["dhd.ini", "saves", "textures", "iso-check.txt", "disc-notice.txt"];
+/// In the new data folder once every file of OLD_DATA was copied (or wasn't there): the copy's only
+/// "done".
+const COPIED: &str = ".copied-from-old-folder";
+/// In the new data folder while a copy runs: the names of OLD_DATA it has put in place, each written
+/// just before its rename, so a copy that failed or was killed takes back exactly those.
+const COPYING: &str = ".copying-from-old-folder";
+
+/// Copies the player's files (OLD_DATA) from the old data folders into data, the first time; whether
+/// data now has them (COPIED is there). Each one comes from the first of olds that has it (the
+/// folder the game used, then the system's app data folder, where an AppImage that RecompLauncher
+/// still ran as an image kept them). Each one is copied as NAME.part and renamed into place only
+/// once all of it was copied (the texture pack's files hard-linked where they can be); the originals
+/// are never moved or changed. Until it returns true the old folder stays the data folder: a copy
+/// that failed is taken back (COPYING) and tried again at the next start, which brings saves made in
+/// the old folder meanwhile.
+pub fn copy_old_data(olds: &[&Path], data: &Path) -> bool {
+    copy_old_data_with(olds, data, |_| Ok(()))
+}
+
+/// copy_old_data, with before_rename run before each file goes into place (tests: a failure there).
+fn copy_old_data_with(olds: &[&Path], data: &Path, before_rename: impl FnMut(&str) -> std::io::Result<()>) -> bool {
+    if data.join(COPIED).is_file() {
+        let _ = fs::remove_file(data.join(COPYING));
+        return true;
+    }
+    if take_back(data).is_err() {
+        return false;
+    }
+    match copy_items(olds, data, before_rename) {
+        Ok(()) => {
+            let _ = fs::remove_file(data.join(COPYING));
+            true
+        }
+        Err(_) => {
+            let _ = take_back(data);
+            false
+        }
+    }
+}
+
+fn copy_items(olds: &[&Path], data: &Path, mut before_rename: impl FnMut(&str) -> std::io::Result<()>) -> std::io::Result<()> {
+    for (i, name) in OLD_DATA.iter().enumerate() {
+        let mut from = None;
+        for old in olds {
+            if old.join(name).try_exists()? {
+                from = Some(old.join(name));
+                break;
+            }
+        }
+        let to = data.join(name);
+        let Some(from) = from.filter(|_| i == 0 || to.symlink_metadata().is_err()) else { continue };
+        let part = data.join(format!("{name}.part"));
+        remove_any(&part)?;
+        copy_tree(&from, &part, *name == "textures")?;
+        let mut journal = fs::OpenOptions::new().create(true).append(true).open(data.join(COPYING))?;
+        std::io::Write::write_all(&mut journal, format!("{name}\n").as_bytes())?;
+        journal.sync_all()?;
+        before_rename(name)?;
+        fs::rename(&part, &to)?;
+    }
+    sync_dir(data);
+    let mut marker = fs::File::create(data.join(COPIED))?;
+    for old in olds {
+        std::io::Write::write_all(&mut marker, format!("{}\n", old.display()).as_bytes())?;
+    }
+    marker.sync_all()?;
+    sync_dir(data);
+    Ok(())
+}
+
+/// Removes what a copy that didn't finish put in data: the files COPYING names (only names of
+/// OLD_DATA), the NAME.part copies, then COPYING itself.
+fn take_back(data: &Path) -> std::io::Result<()> {
+    let journal = data.join(COPYING);
+    match fs::read_to_string(&journal) {
+        Ok(text) => {
+            for name in text.lines().filter(|n| OLD_DATA.contains(n)) {
+                remove_any(&data.join(name))?;
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    for name in OLD_DATA {
+        remove_any(&data.join(format!("{name}.part")))?;
+    }
+    remove_any(&journal)
+}
+
+fn remove_any(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+        Ok(m) if m.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+    }
+}
+
+/// A file, or a folder and everything in it, copied to `to` (which isn't there), each file synced;
+/// with link, each file hard-linked instead where it can be (a texture pack the game only reads:
+/// not twice on the drive), else copied.
+fn copy_tree(from: &Path, to: &Path, link: bool) -> std::io::Result<()> {
+    if fs::metadata(from)?.is_dir() {
+        fs::create_dir(to)?;
+        for entry in fs::read_dir(from)? {
+            let entry = entry?;
+            copy_tree(&entry.path(), &to.join(entry.file_name()), link)?;
+        }
+        Ok(())
+    } else if link && fs::hard_link(from, to).is_ok() {
+        Ok(())
+    } else {
+        fs::copy(from, to)?;
+        // fsync takes any descriptor; Windows' flush wants a writable handle, which a read-only
+        // file refuses (the copy only runs on Linux)
+        if cfg!(unix) {
+            fs::File::open(to)?.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+/// The renames in dir made durable before what follows them (Linux; a folder can't be opened so on
+/// Windows).
+fn sync_dir(dir: &Path) {
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+}
+
 /// The exit code as the game set it.
 pub fn exit_code(status: std::process::ExitStatus) -> Option<u32> {
     status.code().map(|c| c as u32)
@@ -303,6 +472,133 @@ mod tests {
         }
         assert_eq!(get("XDG_DATA_DIRS"), Some(Some("/usr/share:/home/deck/.local/share/flatpak/exports/share".into())));
         assert_eq!((get("HOME"), get("DHD_SETTINGS")), (None, None));  // untouched
+    }
+
+    /// An old data folder (dhd.ini, saves/) and RecompLauncher's new one, under a fresh root.
+    fn old_and_new(test: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("dhd-launcher-{test}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (old, data) = (root.join("usr").join("bin"), root.join("recompdata"));
+        fs::create_dir_all(old.join("saves")).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        fs::write(old.join("dhd.ini"), "iso = old.iso\n").unwrap();
+        fs::write(old.join("saves").join("card0.ps2"), "old save").unwrap();
+        (root, old, data)
+    }
+
+    fn read(p: PathBuf) -> String {
+        fs::read_to_string(p).unwrap_or_default()
+    }
+
+    /// The first start with RecompLauncher's data folder: the player's files copied in, the
+    /// originals left, the old dhd.ini over the one RecompLauncher wrote, nothing else in the way.
+    #[test]
+    fn copies_old_data() {
+        let (root, old, data) = old_and_new("copy");
+        fs::write(data.join("dhd.ini"), "iso = launcher.iso\n").unwrap();
+        fs::write(old.join("dhd.log"), "a log").unwrap();
+        assert!(copy_old_data(&[&old], &data));
+        assert_eq!(read(data.join("dhd.ini")), "iso = old.iso\n");
+        assert_eq!(read(data.join("saves").join("card0.ps2")), "old save");
+        assert!(data.join(COPIED).is_file() && !data.join(COPYING).exists() && !data.join("dhd.log").exists());
+        assert_eq!((read(old.join("dhd.ini")), read(old.join("saves").join("card0.ps2"))), ("iso = old.iso\n".into(), "old save".into()));
+        // done once: a later save in the old folder and RecompLauncher's dhd.ini stay as they are
+        fs::write(old.join("saves").join("card1.ps2"), "later").unwrap();
+        fs::write(data.join("dhd.ini"), "iso = launcher.iso\n").unwrap();
+        assert!(copy_old_data(&[&old], &data));
+        assert!(!data.join("saves").join("card1.ps2").exists());
+        assert_eq!(read(data.join("dhd.ini")), "iso = launcher.iso\n");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A fresh install: nothing to copy, RecompLauncher's dhd.ini kept, done at once.
+    #[test]
+    fn fresh_data() {
+        let (root, old, data) = old_and_new("fresh");
+        fs::remove_dir_all(&old).unwrap();
+        fs::write(data.join("dhd.ini"), "iso = launcher.iso\n").unwrap();
+        assert!(copy_old_data(&[&old], &data));
+        assert_eq!(read(data.join("dhd.ini")), "iso = launcher.iso\n");
+        assert!(data.join(COPIED).is_file() && !data.join("saves").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A copy that fails takes back what it put in place and leaves the old folder in use; the next
+    /// start copies again and brings the save made in the old folder meanwhile.
+    #[test]
+    fn failed_copy_is_taken_back() {
+        let (root, old, data) = old_and_new("failed");
+        fs::create_dir_all(old.join("textures")).unwrap();
+        fs::write(old.join("textures").join("a.png"), "png").unwrap();
+        let fail = |name: &str| if name == "textures" { Err(std::io::Error::other("disk full")) } else { Ok(()) };
+        assert!(!copy_old_data_with(&[&old], &data, fail));
+        for gone in ["dhd.ini", "saves", "textures", "textures.part", COPYING, COPIED] {
+            assert!(!data.join(gone).exists(), "{gone}");
+        }
+        let place = Place { game: old.clone(), data: old.clone(), bundle: None, appimage: None, installed: false };
+        fs::write(old.join("saves").join("card0.ps2"), "newer save").unwrap();
+        let place = place.with_data(data.clone(), None);
+        assert_eq!(place.data, data);
+        assert_eq!(read(data.join("saves").join("card0.ps2")), "newer save");
+        assert_eq!(read(data.join("textures").join("a.png")), "png");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A copy killed after some files went into place: that start played on the old folder, and the
+    /// next one takes them back and copies everything again.
+    #[test]
+    fn interrupted_copy_is_finished() {
+        let (root, old, data) = old_and_new("killed");
+        fs::create_dir_all(old.join("textures")).unwrap();
+        let killed = copy_items(&[&old], &data, |name| if name == "textures" { Err(std::io::Error::other("killed")) } else { Ok(()) });
+        assert!(killed.is_err());
+        assert!(data.join("saves").is_dir() && data.join("textures.part").is_dir() && !data.join(COPIED).exists());
+        fs::write(old.join("saves").join("card0.ps2"), "played meanwhile").unwrap();
+        fs::write(data.join("dhd.ini"), "iso = launcher.iso\n").unwrap();
+        assert!(copy_old_data(&[&old], &data));
+        assert_eq!(read(data.join("saves").join("card0.ps2")), "played meanwhile");
+        assert_eq!(read(data.join("dhd.ini")), "iso = old.iso\n");
+        assert!(data.join("textures").is_dir() && !data.join("textures.part").exists() && !data.join(COPYING).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Files only in the system's app data folder (an AppImage RecompLauncher ran as an image before
+    /// it unpacked them): copied from there, one the game's folder has from the game's folder; the
+    /// texture pack's files linked, not copied.
+    #[test]
+    fn copies_from_app_data() {
+        let (root, old, data) = old_and_new("appdata");
+        fs::remove_dir_all(old.join("saves")).unwrap();
+        let share = root.join("share").join("downhill-revived");
+        fs::create_dir_all(share.join("saves")).unwrap();
+        fs::create_dir_all(share.join("textures")).unwrap();
+        fs::write(share.join("dhd.ini"), "iso = image.iso\n").unwrap();
+        fs::write(share.join("saves").join("card0.ps2"), "image save").unwrap();
+        fs::write(share.join("textures").join("a.png"), "png").unwrap();
+        let place = Place { game: old.clone(), data: old.clone(), bundle: None, appimage: None, installed: false };
+        let place = place.with_data(data.clone(), Some(share.clone()));
+        assert_eq!(place.data, data);
+        assert_eq!(read(data.join("dhd.ini")), "iso = old.iso\n");
+        assert_eq!(read(data.join("saves").join("card0.ps2")), "image save");
+        assert_eq!(read(data.join("textures").join("a.png")), "png");
+        assert_eq!(read(share.join("saves").join("card0.ps2")), "image save");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let (a, b) = (fs::metadata(share.join("textures").join("a.png")).unwrap(), fs::metadata(data.join("textures").join("a.png")).unwrap());
+            assert_eq!((a.dev(), a.ino()), (b.dev(), b.ino()));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A data folder that can't be made: the old folder stays the data folder.
+    #[test]
+    fn unusable_data_keeps_old_folder() {
+        let (root, old, _) = old_and_new("unusable");
+        fs::write(root.join("file"), "").unwrap();
+        let place = Place { game: old.clone(), data: old.clone(), bundle: None, appimage: None, installed: false };
+        assert_eq!(place.with_data(root.join("file").join("recompdata"), None).data, old);
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// dhd.ini as the launcher reads and saves it (the crate's rules, port/render/settings).

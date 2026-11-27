@@ -61,6 +61,7 @@ call, served in arrival order (`launcher_calls.h`, finding 227).
 | `bindings` | shows the Controls tab (keys and controller buttons, the stick picture) | yes | |
 | `server` | asks `server_status` and shows the race server's line | yes | |
 | `install-update` | installs a newer release itself (`install_update`) | yes | |
+| `managed-updates` | asks no `check_update` and hides the Updates row: RecompLauncher installs the releases (started with `RECOMPLAUNCHER=1`; the desktop then has no `install-update` or `patch-notes`) | from RecompLauncher | |
 | `patch-notes` | shows the Patch notes page and the release notes on Play | yes | |
 | `close-game` | stays open while the game runs (`game-exited`, `stop_game`) | yes | |
 | `touch-settings` | shows a touch device's settings (resolution up to `scale_max`, performance mode, widescreen, the Touch tab) | | yes |

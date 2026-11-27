@@ -44,10 +44,21 @@ const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-
 #[cfg(not(windows))]
 const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-update", "patch-notes", "close-game"];
 
+/// CAPS, but started by RecompLauncher (game::updated_by_recomplauncher): its updates are
+/// RecompLauncher's, so no update check, installs or patch notes here ("managed-updates").
+fn caps() -> Vec<&'static str> {
+    if !game::updated_by_recomplauncher() {
+        return CAPS.to_vec();
+    }
+    let mut caps: Vec<&'static str> = CAPS.iter().copied().filter(|c| !matches!(*c, "install-update" | "patch-notes")).collect();
+    caps.push("managed-updates");
+    caps
+}
+
 #[derive(Serialize)]
 struct Snapshot {
     version: &'static str,
-    caps: &'static [&'static str],
+    caps: Vec<&'static str>,
     native_window_controls: bool,
     /// Every setting's value: dhd.ini's, else the player's default (dhd_settings::launcher, the
     /// same JSON a phone's bridge returns).
@@ -144,7 +155,7 @@ fn snapshot(app: State<App>) -> Snapshot {
         .unwrap_or_else(|| app.place.data.join("textures").join("SCUS-97177").join("replacements"));
     Snapshot {
         version: VERSION,
-        caps: CAPS,
+        caps: caps(),
         native_window_controls: cfg!(target_os = "macos"),
         disc_problem: iso.and_then(|p| disc::problem(std::path::Path::new(&p))),
         texture_pack: std::fs::read_dir(pack).is_ok_and(|mut d| d.next().is_some()),
@@ -212,6 +223,9 @@ fn effective(place: &game::Place, key: &str) -> String {
 /// else the online server's backup. A failure is the bottom bar's one line; launcher.log gets the
 /// technical errors, and a note when the backup answered.
 fn check_for_update(place: &game::Place) -> Result<Option<update::Release>, String> {
+    if game::updated_by_recomplauncher() {
+        return Err("RecompLauncher installs this game's updates.".into());
+    }
     let own = effective(place, "update_url");
     match update::check(Some(own.as_str()), update::platform(place), VERSION) {
         Ok(checked) => {
@@ -240,6 +254,9 @@ async fn check_update(handle: AppHandle) -> Result<UpdateCheck, String> {
 /// Installs the release, then starts the new launcher and ends this one.
 #[tauri::command]
 async fn install_update(handle: AppHandle, release: update::Release) -> Result<(), String> {
+    if game::updated_by_recomplauncher() {
+        return Err("RecompLauncher installs this game's updates.".into());
+    }
     let h = handle.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut last = 0u64;
@@ -415,7 +432,8 @@ fn play_at_once(place: game::Place) -> Option<game::Place> {
         return Some(place);
     }
     let Ok(mut child) = place.start() else { return Some(place) };
-    let auto = effective(&place, "auto_update");
+    // started by RecompLauncher: no check and no install, whatever auto_update says
+    let auto = if game::updated_by_recomplauncher() { "off".to_string() } else { effective(&place, "auto_update") };
     let check = (auto != "off").then(|| {
         let place = place.clone();
         std::thread::spawn(move || check_for_update(&place))

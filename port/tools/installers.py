@@ -330,6 +330,9 @@ def linux_appimage(version, files, stage, out_dir, platform, servers, elf, linke
     doc.mkdir(parents=True, exist_ok=True)
     for name in ('README.txt', 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt'):
         (doc / name).write_bytes(files[folder + name])
+    # at the AppDir's root, as the zip has it beside the launcher: RecompLauncher reads an AppImage's
+    # own /recomplauncher.json first
+    (appdir / 'recomplauncher.json').write_bytes(files[folder + 'recomplauncher.json'])
 
     ours = {'usr/bin/' + platform.launcher, 'usr/bin/' + platform.game}
     regular = sorted(q.relative_to(appdir).as_posix() for q in appdir.rglob('*') if q.is_file() and not q.is_symlink())

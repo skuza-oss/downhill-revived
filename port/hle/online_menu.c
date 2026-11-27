@@ -245,6 +245,18 @@ static int outdated;  /* the server refused this release: HOME offers Update Now
 /* 44 characters: the footer fits about 45 at 640 wide (0.1.0 shows the server's copy there too) */
 static const char outdated_text[] = "A new version is out. Update to play online.";
 
+/* Started by RecompLauncher (RECOMPLAUNCHER=1): it installs the releases itself, so HOME has
+   no Update Now (port/launcher game.rs updated_by_recomplauncher). */
+static int updated_by_recomplauncher(void)
+{
+#ifndef __ANDROID__
+    const char *by = getenv("RECOMPLAUNCHER");
+    return by && !strcmp(by, "1");
+#else
+    return 0;
+#endif
+}
+
 static const char *server(void)
 {
     const char *s = getenv("DHD_NET_SERVER");
@@ -615,7 +627,7 @@ static void page_build(MenuPage *p)
         }
         if (host_service_net_offered() & NET_OFFER_P2P) home_add(p, HOME_P2P, "Create A P2P Race");
         home_add(p, HOME_JOIN, "Join With A Code");
-        if (outdated) home_add(p, HOME_UPDATE, "Update Now");
+        if (outdated && !updated_by_recomplauncher()) home_add(p, HOME_UPDATE, "Update Now");
         disc_shown = disc_note();
         for (const char *const *line = disc_shown; line && *line; line++) menu_page_text(p, *line);
         break;
